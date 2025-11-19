@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sy_merchant_scraper
+    env_file:
+      - .env
+    volumes:
+      # Mount data directory for input/output persistence
+      - ./data:/app/data
+      # Mount logs directory for log persistence
+      - ./logs:/app/logs
+      # Optional: Mount source code for development (comment out for production)
+      # - ./scrapers:/app/scrapers
+      # - ./utils:/app/utils
+      # - ./config:/app/config
+      # - ./main.py:/app/main.py
+    restart: unless-stopped
+    # Uncomment to limit resources
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1'
+    #       memory: 1G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 512M
+
+    # Uncomment to override the default command
+    # command: python main.py
+
+    # Uncomment for interactive debugging
+    # stdin_open: true
+    # tty: true

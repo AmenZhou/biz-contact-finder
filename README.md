@@ -37,7 +37,37 @@ sy_promotion_merchants_craw/
 
 ## Setup
 
-### 1. Install Dependencies
+### Option 1: Docker Setup (Recommended)
+
+The easiest way to run this project is using Docker:
+
+```bash
+# 1. Configure API keys
+cp .env.example .env
+nano .env  # Add your OpenAI and Google Places API keys
+
+# 2. Build and run with Docker Compose
+docker-compose up --build
+
+# Or run in detached mode
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop the container
+docker-compose down
+```
+
+**Docker Benefits:**
+- No Python environment setup needed
+- Consistent environment across all machines
+- Automatic data persistence via volumes
+- Easy to deploy and scale
+
+### Option 2: Local Python Setup
+
+If you prefer to run without Docker:
 
 ```bash
 # Create virtual environment
@@ -72,15 +102,52 @@ Place your CSV file in the `data/` directory. Expected columns:
 
 ## Usage
 
-### Test with Sample Data (5 companies)
+### Using Docker (Recommended)
 
+**Test with Sample Data (5 companies):**
+```bash
+docker-compose up
+```
+
+**Process All Companies:**
+
+1. Edit `main.py` and change line 260:
+   ```python
+   scraper.run(limit=5)  # Remove limit
+   ```
+   to:
+   ```python
+   scraper.run()  # Process all
+   ```
+
+2. Rebuild and run:
+   ```bash
+   docker-compose up --build
+   ```
+
+**Advanced Docker Commands:**
+```bash
+# Run specific Python command
+docker-compose run scraper python main.py
+
+# Interactive shell inside container
+docker-compose run scraper /bin/bash
+
+# View real-time logs
+docker-compose logs -f scraper
+
+# Remove container and volumes
+docker-compose down -v
+```
+
+### Using Local Python
+
+**Test with Sample Data (5 companies):**
 ```bash
 python main.py
 ```
 
-The default configuration processes 5 companies for testing.
-
-### Process All Companies
+**Process All Companies:**
 
 Edit `main.py` and change:
 ```python
@@ -151,15 +218,37 @@ For 68 companies:
 
 ## Troubleshooting
 
+### Docker Issues
+
+**"docker: command not found"**
+- Install Docker Desktop from [docker.com](https://www.docker.com/products/docker-desktop)
+
+**"Cannot connect to Docker daemon"**
+- Ensure Docker Desktop is running
+
+**"Port already in use"**
+- The scraper doesn't expose ports by default
+- If you modified docker-compose.yml, change the port mapping
+
+**Rebuild after code changes:**
+```bash
+docker-compose up --build
+```
+
 ### Common Issues
 
 **"No module named 'googlemaps'"**
 ```bash
+# If using local Python:
 pip install -r requirements.txt
+
+# If using Docker:
+docker-compose up --build
 ```
 
 **"OpenAI API key is required"**
 - Add your API key to `.env` file
+- If using Docker, restart: `docker-compose restart`
 
 **"Rate limit exceeded"**
 - The script has built-in rate limiting
@@ -172,6 +261,11 @@ pip install -r requirements.txt
 ### Resume After Interruption
 
 The script automatically saves progress to `data/progress.json`. If interrupted, simply run again and it will skip already processed companies.
+
+**With Docker:**
+```bash
+docker-compose up  # Will resume from where it stopped
+```
 
 ## Configuration
 

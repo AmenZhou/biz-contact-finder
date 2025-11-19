@@ -31,3 +31,6 @@ logs/*.log
 dist/
 build/
 *.egg-info/
+
+# Docker
+.dockerignore

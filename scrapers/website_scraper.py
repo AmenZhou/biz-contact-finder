@@ -9,6 +9,8 @@ from urllib.parse import urljoin, urlparse
 from ratelimit import limits, sleep_and_retry
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+import re
+
 from config.settings import (
     USER_AGENT,
     REQUEST_TIMEOUT,
@@ -18,6 +20,13 @@ from config.settings import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Patterns for extracting contact info directly from HTML
+EMAIL_PATTERN = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
+LINKEDIN_PATTERN = re.compile(r'https?://(?:www\.)?linkedin\.com/(?:company|in)/[a-zA-Z0-9_-]+/?')
+TWITTER_PATTERN = re.compile(r'https?://(?:www\.)?(?:twitter\.com|x\.com)/[a-zA-Z0-9_]+/?')
+FACEBOOK_PATTERN = re.compile(r'https?://(?:www\.)?facebook\.com/[a-zA-Z0-9._-]+/?')
+INSTAGRAM_PATTERN = re.compile(r'https?://(?:www\.)?instagram\.com/[a-zA-Z0-9._]+/?')
 
 
 class WebsiteScraper:
@@ -193,3 +202,150 @@ class WebsiteScraper:
         """Extract domain from URL"""
         parsed = urlparse(url)
         return parsed.netloc or parsed.path
+
+    def extract_emails_from_html(self, html: str) -> List[str]:
+        """
+        Extract email addresses directly from HTML using regex
+
+        Args:
+            html: HTML content
+
+        Returns:
+            List of unique email addresses found
+        """
+        emails = EMAIL_PATTERN.findall(html)
+
+        # Filter out common false positives
+        filtered_emails = []
+        exclude_patterns = ['example.com', 'your-email', 'email@', 'test@', 'sample@',
+                          '.png', '.jpg', '.gif', '.css', '.js', 'wixpress', 'sentry']
+
+        for email in emails:
+            email = email.lower()
+            if not any(pattern in email for pattern in exclude_patterns):
+                if email not in filtered_emails:
+                    filtered_emails.append(email)
+
+        # Sort by priority (events, marketing, info, contact first)
+        priority_prefixes = ['events', 'marketing', 'info', 'contact', 'hello', 'sales']
+
+        def email_priority(email):
+            for i, prefix in enumerate(priority_prefixes):
+                if email.startswith(prefix):
+                    return i
+            return len(priority_prefixes)
+
+        filtered_emails.sort(key=email_priority)
+
+        return filtered_emails
+
+    def extract_social_links(self, html: str) -> Dict[str, str]:
+        """
+        Extract social media links directly from HTML
+
+        Args:
+            html: HTML content
+
+        Returns:
+            Dictionary with social media URLs
+        """
+        social_links = {
+            'linkedin': None,
+            'twitter': None,
+            'facebook': None,
+            'instagram': None
+        }
+
+        # Find LinkedIn
+        linkedin_matches = LINKEDIN_PATTERN.findall(html)
+        if linkedin_matches:
+            social_links['linkedin'] = linkedin_matches[0]
+
+        # Find Twitter/X
+        twitter_matches = TWITTER_PATTERN.findall(html)
+        if twitter_matches:
+            social_links['twitter'] = twitter_matches[0]
+
+        # Find Facebook
+        facebook_matches = FACEBOOK_PATTERN.findall(html)
+        if facebook_matches:
+            # Filter out share links
+            for fb_url in facebook_matches:
+                if '/sharer' not in fb_url and '/share' not in fb_url:
+                    social_links['facebook'] = fb_url
+                    break
+
+        # Find Instagram
+        instagram_matches = INSTAGRAM_PATTERN.findall(html)
+        if instagram_matches:
+            social_links['instagram'] = instagram_matches[0]
+
+        return social_links
+
+    def scrape_multiple_pages(self, website_url: str) -> Optional[Dict]:
+        """
+        Scrape multiple pages from a website to find contact info
+
+        Args:
+            website_url: Company website URL
+
+        Returns:
+            Dictionary with combined HTML from multiple pages
+        """
+        if not website_url:
+            return None
+
+        # Ensure URL has protocol
+        if not website_url.startswith(('http://', 'https://')):
+            website_url = 'https://' + website_url
+
+        logger.info(f"Scraping website: {website_url}")
+
+        # Fetch homepage
+        homepage_html = self.fetch_page(website_url)
+        if not homepage_html:
+            logger.warning(f"Failed to fetch homepage: {website_url}")
+            return None
+
+        # Find contact pages
+        contact_pages = self.find_contact_pages(website_url, homepage_html)
+
+        # Also try common paths
+        base_parsed = urlparse(website_url)
+        base_url = f"{base_parsed.scheme}://{base_parsed.netloc}"
+        common_paths = ['/contact', '/contact-us', '/about', '/about-us', '/team', '/our-team']
+
+        for path in common_paths:
+            full_url = base_url + path
+            if full_url not in contact_pages:
+                contact_pages.append(full_url)
+
+        # Fetch and combine HTML from multiple pages
+        combined_html = homepage_html
+        fetched_pages = [website_url]
+
+        for page_url in contact_pages[:5]:  # Try first 5 contact pages
+            if page_url not in fetched_pages:
+                html = self.fetch_page(page_url)
+                if html:
+                    combined_html += "\n\n<!-- PAGE: {} -->\n\n{}".format(page_url, html)
+                    fetched_pages.append(page_url)
+                    logger.info(f"Fetched additional page: {page_url}")
+
+        # Extract emails and social links directly
+        emails = self.extract_emails_from_html(combined_html)
+        social_links = self.extract_social_links(combined_html)
+
+        # Extract relevant contact section for LLM
+        contact_section = self.extract_contact_section(combined_html)
+
+        return {
+            'url': website_url,
+            'html': contact_section,
+            'full_html': combined_html,
+            'has_contact_page': len(contact_pages) > 0,
+            'contact_page_urls': contact_pages,
+            'extracted_emails': emails,
+            'extracted_social': social_links,
+            'pages_fetched': fetched_pages
+        }

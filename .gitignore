@@ -15,7 +15,8 @@ ENV/
 # Data files
 data/progress.json
 data/output_enriched.csv
-data/*.xlsx
+*.xlsx
+*.csv
 
 # Logs
 logs/*.log

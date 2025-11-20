@@ -42,7 +42,7 @@ class LLMContactParser:
         if len(html) > max_html_length:
             html = html[:max_html_length] + "..."
 
-        prompt = f"""You are a contact information extraction specialist. Extract contact information for the company "{company_name}" from the following HTML content.
+        prompt = f"""You are an expert contact information extraction specialist. Your task is to thoroughly extract ALL contact information for the company "{company_name}" from the following HTML content.
 
 HTML Content:
 {html}
@@ -51,25 +51,56 @@ Extract the following information and return ONLY a valid JSON object with these
 
 {{
   "email": "primary contact email address",
+  "email_contact_name": "name of person associated with the primary email (parse from firstname.lastname@ pattern if personal email)",
+  "email_contact_title": "job title of person associated with the primary email",
   "email_secondary": "secondary email if available",
   "phone": "phone number in format (XXX) XXX-XXXX",
+  "phone_contact_name": "name of person or department associated with this phone",
+  "phone_contact_title": "title/role associated with this phone (e.g., Sales, Support, Manager)",
   "phone_secondary": "secondary phone if available",
   "linkedin": "LinkedIn company profile URL",
   "twitter": "Twitter/X handle or URL",
   "facebook": "Facebook page URL",
-  "contact_person": "Name of contact person if mentioned",
-  "contact_title": "Title of contact person if mentioned",
+  "instagram": "Instagram URL or handle",
+  "contact_person": "Name of key contact person (marketing, events, or general manager)",
+  "contact_title": "Title of key contact person if mentioned",
   "address": "Full physical address if available"
 }}
 
+EXTRACTION STRATEGIES - Be thorough:
+
+1. **EMAIL DISCOVERY** (search aggressively):
+   - Look for mailto: links in the HTML
+   - Check footer sections for email addresses
+   - Look for patterns like "email us at", "contact:", "reach us"
+   - Check for domain-based emails (info@, contact@, hello@, events@, marketing@, careers@)
+   - Look in href attributes and data attributes
+   - PREFER these emails in order: events@, marketing@, info@, contact@, hello@
+
+2. **LINKEDIN DISCOVERY**:
+   - Search for linkedin.com/company/ URLs
+   - Look in social media icon links
+   - Check footer social links
+   - Look for "in" icons with hrefs
+
+3. **SOCIAL MEDIA**:
+   - Check for social media icons/links in header and footer
+   - Look for share buttons
+   - Search for twitter.com, x.com, facebook.com, instagram.com URLs
+
+4. **CONTACT PERSON**:
+   - Look for staff/team pages references
+   - Find names with titles like "Manager", "Director", "Owner", "Marketing"
+   - Check "About" sections for key personnel
+
 IMPORTANT RULES:
-1. Only extract information that is clearly visible in the HTML
+1. Search the ENTIRE HTML thoroughly - emails are often hidden in footers or data attributes
 2. Do NOT make up or hallucinate any contact information
-3. For emails, prefer general contact emails (info@, contact@, hello@) over personal emails
-4. Format phone numbers consistently as (XXX) XXX-XXXX for US numbers
-5. Return ONLY the JSON object, no other text
-6. If a field is not found, use null (not empty string)
-7. Verify that email addresses and URLs are properly formatted
+3. Format phone numbers consistently as (XXX) XXX-XXXX for US numbers
+4. Return ONLY the JSON object, no other text
+5. If a field is not found after thorough search, use null
+6. Verify that email addresses contain @ and valid domain extensions
+7. LinkedIn URLs should contain linkedin.com/company/ or linkedin.com/in/
 """
         return prompt
 
@@ -168,17 +199,23 @@ IMPORTANT RULES:
                     contact_info[phone_field] = phone
 
         # Validate URLs
-        url_fields = ['linkedin', 'twitter', 'facebook']
+        url_fields = ['linkedin', 'twitter', 'facebook', 'instagram']
         for url_field in url_fields:
             if url_field in contact_info and contact_info[url_field]:
                 url = contact_info[url_field].strip()
-                if not url.startswith('http'):
-                    # Try to fix common issues
-                    if url_field == 'linkedin' and 'linkedin.com' not in url:
-                        contact_info[url_field] = None
-                    elif url_field == 'twitter' and 'twitter.com' not in url and 'x.com' not in url:
-                        contact_info[url_field] = None
-                    elif url_field == 'facebook' and 'facebook.com' not in url:
-                        contact_info[url_field] = None
+                # Add https:// if missing
+                if not url.startswith('http') and '.' in url:
+                    url = 'https://' + url
+                    contact_info[url_field] = url
+
+                # Validate URL contains expected domain
+                if url_field == 'linkedin' and 'linkedin.com' not in url:
+                    contact_info[url_field] = None
+                elif url_field == 'twitter' and 'twitter.com' not in url and 'x.com' not in url:
+                    contact_info[url_field] = None
+                elif url_field == 'facebook' and 'facebook.com' not in url:
+                    contact_info[url_field] = None
+                elif url_field == 'instagram' and 'instagram.com' not in url:
+                    contact_info[url_field] = None
 
         return contact_info

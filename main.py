@@ -8,12 +8,57 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
 
+import re
+
 from utils.logger import setup_logger
 from utils.validators import calculate_quality_score
 from scrapers.google_places import GooglePlacesScraper
 from scrapers.website_scraper import WebsiteScraper
 from scrapers.llm_parser import LLMContactParser
 from config.settings import INPUT_CSV, OUTPUT_CSV, PROGRESS_FILE
+
+
+def extract_name_from_email(email: str) -> Optional[str]:
+    """
+    Extract person name from email address pattern
+
+    Examples:
+        john.doe@company.com -> John Doe
+        jdoe@company.com -> None (can't determine)
+        michael.colacino@jll.com -> Michael Colacino
+    """
+    if not email or '@' not in email:
+        return None
+
+    local_part = email.split('@')[0].lower()
+
+    # Skip generic emails
+    generic_prefixes = ['info', 'contact', 'hello', 'support', 'sales', 'admin',
+                       'help', 'service', 'care', 'team', 'office', 'hr', 'jobs',
+                       'careers', 'press', 'media', 'marketing', 'events']
+    if local_part in generic_prefixes:
+        return None
+
+    # Try firstname.lastname pattern
+    if '.' in local_part:
+        parts = local_part.split('.')
+        if len(parts) == 2:
+            first_name = parts[0].capitalize()
+            last_name = parts[1].capitalize()
+            # Skip if parts are too short (likely initials)
+            if len(parts[0]) > 1 and len(parts[1]) > 1:
+                return f"{first_name} {last_name}"
+
+    # Try firstname_lastname pattern
+    if '_' in local_part:
+        parts = local_part.split('_')
+        if len(parts) == 2:
+            first_name = parts[0].capitalize()
+            last_name = parts[1].capitalize()
+            if len(parts[0]) > 1 and len(parts[1]) > 1:
+                return f"{first_name} {last_name}"
+
+    return None
 
 # Setup logging
 logger = setup_logger()
@@ -86,12 +131,17 @@ class ContactInfoScraper:
             'reviews': row.get('Reviews', ''),
             'website': None,
             'email': None,
+            'email_contact_name': None,
+            'email_contact_title': None,
             'email_secondary': None,
             'phone': None,
+            'phone_contact_name': None,
+            'phone_contact_title': None,
             'phone_secondary': None,
             'linkedin': None,
             'twitter': None,
             'facebook': None,
+            'instagram': None,
             'contact_person': None,
             'contact_title': None,
             'address': address,
@@ -115,10 +165,10 @@ class ContactInfoScraper:
         # Step 2: Scrape website if available
         if result['website']:
             logger.info(f"Step 2: Scraping website: {result['website']}")
-            scraped_data = self.web_scraper.scrape_contact_info(result['website'])
+            scraped_data = self.web_scraper.scrape_multiple_pages(result['website'])
 
             if scraped_data:
-                logger.info(f"✓ Successfully scraped website")
+                logger.info(f"✓ Successfully scraped website ({len(scraped_data.get('pages_fetched', []))} pages)")
 
                 # Step 3: Parse with LLM
                 logger.info("Step 3: Parsing with LLM...")
@@ -131,10 +181,13 @@ class ContactInfoScraper:
                     # Merge LLM results
                     result.update({
                         'email': contact_info.get('email'),
+                        'email_contact_name': contact_info.get('email_contact_name'),
+                        'email_contact_title': contact_info.get('email_contact_title'),
                         'email_secondary': contact_info.get('email_secondary'),
                         'linkedin': contact_info.get('linkedin'),
                         'twitter': contact_info.get('twitter'),
                         'facebook': contact_info.get('facebook'),
+                        'instagram': contact_info.get('instagram'),
                         'contact_person': contact_info.get('contact_person'),
                         'contact_title': contact_info.get('contact_title'),
                     })
@@ -142,17 +195,71 @@ class ContactInfoScraper:
                     # Use LLM phone if better than Google Places
                     if contact_info.get('phone') and not result['phone']:
                         result['phone'] = contact_info['phone']
+                        result['phone_contact_name'] = contact_info.get('phone_contact_name')
+                        result['phone_contact_title'] = contact_info.get('phone_contact_title')
 
                     if contact_info.get('phone_secondary'):
                         result['phone_secondary'] = contact_info['phone_secondary']
 
                     result['data_source'].append('llm_parser')
                     logger.info(f"✓ LLM parsing successful")
-                    logger.info(f"  Email: {result['email']}")
-                    logger.info(f"  Phone: {result['phone']}")
-                    logger.info(f"  LinkedIn: {result['linkedin']}")
                 else:
                     logger.warning("✗ LLM parsing failed")
+
+                # Step 4: Merge regex-extracted data as backup/supplement
+                extracted_emails = scraped_data.get('extracted_emails', [])
+                extracted_social = scraped_data.get('extracted_social', {})
+
+                # Use regex-extracted email if LLM didn't find one
+                if not result['email'] and extracted_emails:
+                    result['email'] = extracted_emails[0]
+                    result['data_source'].append('regex_email')
+                    logger.info(f"✓ Found email via regex: {result['email']}")
+
+                # Use secondary email from regex if available
+                if not result['email_secondary'] and len(extracted_emails) > 1:
+                    result['email_secondary'] = extracted_emails[1]
+
+                # Extract name from email pattern if not already set
+                if result['email'] and not result['email_contact_name']:
+                    extracted_name = extract_name_from_email(result['email'])
+                    if extracted_name:
+                        result['email_contact_name'] = extracted_name
+                        logger.info(f"✓ Extracted name from email: {extracted_name}")
+
+                # Use regex-extracted social links if LLM didn't find them
+                for social_key in ['linkedin', 'twitter', 'facebook', 'instagram']:
+                    if not result.get(social_key) and extracted_social.get(social_key):
+                        result[social_key] = extracted_social[social_key]
+                        if 'regex_social' not in result['data_source']:
+                            result['data_source'].append('regex_social')
+
+                # Log final results
+                if result['email']:
+                    contact_info_str = result['email']
+                    if result.get('email_contact_name'):
+                        contact_info_str += f" ({result['email_contact_name']}"
+                        if result.get('email_contact_title'):
+                            contact_info_str += f", {result['email_contact_title']}"
+                        contact_info_str += ")"
+                    logger.info(f"  Email: {contact_info_str}")
+                else:
+                    logger.info(f"  Email: None")
+
+                if result['phone']:
+                    phone_info_str = result['phone']
+                    if result.get('phone_contact_name'):
+                        phone_info_str += f" ({result['phone_contact_name']}"
+                        if result.get('phone_contact_title'):
+                            phone_info_str += f", {result['phone_contact_title']}"
+                        phone_info_str += ")"
+                    logger.info(f"  Phone: {phone_info_str}")
+                else:
+                    logger.info(f"  Phone: None")
+
+                logger.info(f"  LinkedIn: {result['linkedin']}")
+                if result.get('instagram'):
+                    logger.info(f"  Instagram: {result['instagram']}")
             else:
                 logger.warning("✗ Website scraping failed")
         else:
@@ -208,9 +315,11 @@ class ContactInfoScraper:
 
             # Reorder columns for better readability
             column_order = [
-                'name', 'type', 'website', 'email', 'email_secondary',
-                'phone', 'phone_secondary', 'address',
-                'linkedin', 'twitter', 'facebook',
+                'name', 'type', 'website',
+                'email', 'email_contact_name', 'email_contact_title', 'email_secondary',
+                'phone', 'phone_contact_name', 'phone_contact_title', 'phone_secondary',
+                'address',
+                'linkedin', 'twitter', 'facebook', 'instagram',
                 'contact_person', 'contact_title',
                 'stars', 'reviews',
                 'quality_score', 'data_source', 'last_updated'
@@ -255,9 +364,8 @@ def main():
     """Entry point"""
     scraper = ContactInfoScraper()
 
-    # For initial testing, process only 5 companies
-    # Remove limit parameter to process all companies
-    scraper.run(limit=5)  # Change to scraper.run() for full batch
+    # Process all companies
+    scraper.run()  # Full batch
 
 
 if __name__ == '__main__':

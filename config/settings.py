@@ -22,7 +22,7 @@ LOG_FILE = 'logs/scraper.log'
 
 # File Paths
 INPUT_CSV = 'data/330Madison.csv'  # All merchants
-OUTPUT_CSV = 'data/output_enriched.csv'
+OUTPUT_CSV = 'data/output_all_merchants.csv'
 PROGRESS_FILE = 'data/progress_test.json'
 
 # OpenAI Settings
@@ -40,6 +40,17 @@ CONTACT_PAGE_KEYWORDS = ['contact', 'about', 'reach-us', 'get-in-touch']
 ATTORNEY_PAGE_KEYWORDS = ['attorneys', 'lawyers', 'our-team', 'professionals', 'people',
                           'our-attorneys', 'our-lawyers', 'partners', 'associates', 'staff',
                           'practice-areas', 'team', 'bio', 'profile']
+
+# Office building detection keywords
+OFFICE_BUILDING_KEYWORDS = [
+    'business center', 'office building', 'commercial building', 'office space',
+    'property management', 'real estate', 'realty', 'tower', 'plaza', 'center'
+]
+
+# Tenant services page keywords for office buildings
+TENANT_PAGE_KEYWORDS = ['tenant', 'tenants', 'tenant-services', 'amenities', 'building-services',
+                        'property-management', 'leasing', 'building-management', 'community',
+                        'concierge', 'services', 'building-team', 'management-team']
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 

@@ -15,7 +15,7 @@ from utils.validators import calculate_quality_score
 from scrapers.google_places import GooglePlacesScraper
 from scrapers.website_scraper import WebsiteScraper
 from scrapers.llm_parser import LLMContactParser
-from config.settings import INPUT_CSV, OUTPUT_CSV, PROGRESS_FILE, LAWYERS_CSV
+from config.settings import INPUT_CSV, OUTPUT_CSV, PROGRESS_FILE, LAWYERS_CSV, OFFICE_BUILDING_KEYWORDS
 
 
 def extract_name_from_email(email: str) -> Optional[str]:
@@ -92,6 +92,32 @@ def is_law_firm(company_name: str, company_type: str = '') -> bool:
 
     return False
 
+
+def is_office_building(company_name: str, company_type: str = '') -> bool:
+    """
+    Detect if a company is an office building based on name and type
+
+    Args:
+        company_name: Name of the company
+        company_type: Type/category of the business
+
+    Returns:
+        True if likely an office building
+    """
+    combined = f"{company_name} {company_type}".lower()
+
+    # Check for office building keywords
+    for keyword in OFFICE_BUILDING_KEYWORDS:
+        if keyword in combined:
+            return True
+
+    # Check if name looks like a building address (e.g., "330 Madison Avenue")
+    if re.match(r'^\d+\s+\w+\s+(avenue|ave|street|st|boulevard|blvd|place|plaza|tower)', company_name.lower()):
+        return True
+
+    return False
+
+
 # Setup logging
 logger = setup_logger()
 
@@ -156,6 +182,7 @@ class ContactInfoScraper:
         # Initialize result with original data
         company_type = row.get('Type', '')
         is_law = is_law_firm(company_name, company_type)
+        is_office = is_office_building(company_name, company_type)
 
         result = {
             'name': company_name,
@@ -163,6 +190,7 @@ class ContactInfoScraper:
             'original_address': address,
             'type': company_type,
             'is_law_firm': is_law,
+            'is_office_building': is_office,
             'stars': row.get('Starts', ''),  # Note: typo in original CSV
             'reviews': row.get('Reviews', ''),
             'website': None,
@@ -189,6 +217,8 @@ class ContactInfoScraper:
 
         if is_law:
             logger.info(f"⚖️  Detected as law firm - will extract attorney contacts")
+        if is_office:
+            logger.info(f"🏢 Detected as office building - will extract tenant engagement contacts")
 
         # Step 1: Get website from Google Places
         logger.info("Step 1: Checking Google Places...")
@@ -205,7 +235,7 @@ class ContactInfoScraper:
         # Step 2: Scrape website if available
         if result['website']:
             logger.info(f"Step 2: Scraping website: {result['website']}")
-            scraped_data = self.web_scraper.scrape_multiple_pages(result['website'], is_law_firm=is_law)
+            scraped_data = self.web_scraper.scrape_multiple_pages(result['website'], is_law_firm=is_law, is_office_building=is_office)
 
             if scraped_data:
                 logger.info(f"✓ Successfully scraped website ({len(scraped_data.get('pages_fetched', []))} pages)")
@@ -238,7 +268,8 @@ class ContactInfoScraper:
                 contact_info = self.llm_parser.parse_contact_info(
                     html_for_llm,
                     company_name,
-                    is_law_firm=is_law
+                    is_law_firm=is_law,
+                    is_office_building=is_office
                 )
 
                 if contact_info:

@@ -16,6 +16,7 @@ from config.settings import (
     REQUEST_TIMEOUT,
     CONTACT_PAGE_KEYWORDS,
     ATTORNEY_PAGE_KEYWORDS,
+    TENANT_PAGE_KEYWORDS,
     MAX_REQUESTS_PER_SECOND,
     MAX_RETRIES
 )
@@ -171,6 +172,35 @@ class WebsiteScraper:
                         logger.debug(f"Found potential attorney page: {full_url}")
 
         return attorney_urls
+
+    def find_tenant_pages(self, base_url: str, html: str) -> List[str]:
+        """
+        Find tenant services/amenities pages from office building websites
+
+        Args:
+            base_url: Base URL of the website
+            html: HTML content of homepage
+
+        Returns:
+            List of potential tenant services page URLs
+        """
+        soup = BeautifulSoup(html, 'lxml')
+        tenant_urls = []
+
+        # Find all links
+        for link in soup.find_all('a', href=True):
+            href = link['href'].lower()
+            text = link.get_text().lower()
+
+            # Check if link text or href contains tenant keywords
+            for keyword in TENANT_PAGE_KEYWORDS:
+                if keyword in href or keyword in text:
+                    full_url = urljoin(base_url, link['href'])
+                    if full_url not in tenant_urls:
+                        tenant_urls.append(full_url)
+                        logger.debug(f"Found potential tenant page: {full_url}")
+
+        return tenant_urls
 
     def extract_lawyer_profiles(self, html: str, base_url: str = None) -> List[Dict]:
         """
@@ -566,13 +596,14 @@ class WebsiteScraper:
 
         return social_links
 
-    def scrape_multiple_pages(self, website_url: str, is_law_firm: bool = False) -> Optional[Dict]:
+    def scrape_multiple_pages(self, website_url: str, is_law_firm: bool = False, is_office_building: bool = False) -> Optional[Dict]:
         """
         Scrape multiple pages from a website to find contact info
 
         Args:
             website_url: Company website URL
             is_law_firm: If True, also scrape attorney/lawyer pages
+            is_office_building: If True, also scrape tenant services/amenities pages
 
         Returns:
             Dictionary with combined HTML from multiple pages
@@ -617,6 +648,20 @@ class WebsiteScraper:
                 if full_url not in attorney_pages:
                     attorney_pages.append(full_url)
             logger.info(f"Found {len(attorney_pages)} potential attorney pages")
+
+        # Find tenant pages if this is an office building
+        tenant_pages = []
+        if is_office_building:
+            tenant_pages = self.find_tenant_pages(website_url, homepage_html)
+            # Add common office building paths
+            building_paths = ['/tenant-services', '/tenants', '/amenities', '/services',
+                            '/building-services', '/property-management', '/leasing',
+                            '/building-team', '/management', '/concierge']
+            for path in building_paths:
+                full_url = base_url + path
+                if full_url not in tenant_pages:
+                    tenant_pages.append(full_url)
+            logger.info(f"Found {len(tenant_pages)} potential tenant services pages")
 
         # Fetch and combine HTML from multiple pages
         combined_html = homepage_html
@@ -720,6 +765,16 @@ class WebsiteScraper:
 
             lawyers = unique_lawyers
             logger.info(f"Final lawyer count after dedup and profile scraping: {len(lawyers)}")
+
+        # Fetch tenant services pages for office buildings
+        if is_office_building:
+            for page_url in tenant_pages[:5]:  # Try first 5 tenant pages
+                if page_url not in fetched_pages:
+                    html = self.fetch_page(page_url)
+                    if html:
+                        combined_html += "\n\n<!-- TENANT PAGE: {} -->\n\n{}".format(page_url, html)
+                        fetched_pages.append(page_url)
+                        logger.info(f"Fetched tenant services page: {page_url}")
 
         # Extract emails and social links directly
         emails = self.extract_emails_from_html(combined_html)

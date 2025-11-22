@@ -26,7 +26,7 @@ class LLMContactParser:
         self.client = OpenAI(api_key=api_key)
         self.model = OPENAI_MODEL
 
-    def create_extraction_prompt(self, html: str, company_name: str, is_law_firm: bool = False) -> str:
+    def create_extraction_prompt(self, html: str, company_name: str, is_law_firm: bool = False, is_office_building: bool = False) -> str:
         """
         Create a prompt for extracting contact information
 
@@ -34,13 +34,14 @@ class LLMContactParser:
             html: HTML content to parse
             company_name: Name of the company
             is_law_firm: If True, also extract lawyer/attorney information
+            is_office_building: If True, prioritize tenant engagement contacts
 
         Returns:
             Formatted prompt string
         """
         # Truncate HTML if too long (GPT-4o-mini has 128k context but we want to keep costs low)
-        # Increased for law firms to capture attorney page content with emails/phones
-        max_html_length = 25000 if is_law_firm else 8000
+        # Increased for law firms and office buildings to capture more content
+        max_html_length = 25000 if (is_law_firm or is_office_building) else 8000
         if len(html) > max_html_length:
             html = html[:max_html_length] + "..."
 
@@ -137,9 +138,35 @@ IMPORTANT: Even if company email wasn't found, lawyers may still have individual
 
 Return "lawyers": [] only if truly no attorney information is found.
 """
+
+        # Add office building specific instructions
+        if is_office_building:
+            prompt += """
+
+CRITICAL - OFFICE BUILDING TENANT ENGAGEMENT EXTRACTION:
+
+For office buildings, you MUST prioritize finding contacts for:
+1. **Tenant Engagement Team** - Primary contact for tenant relations
+2. **Amenities Manager / Community Manager** - Manages building amenities and events
+3. **Property Manager** - Overall building management
+4. **Concierge / Building Services** - Day-to-day tenant services
+
+PRIORITIZE these email patterns (in order of preference):
+- tenant@, tenants@, tenant-services@
+- amenities@, community@, events@
+- propertymanager@, management@, building@
+- concierge@, services@, leasing@
+
+For contact_person and contact_title fields, prefer:
+- "Tenant Engagement Manager", "Community Manager", "Amenities Director"
+- "Property Manager", "Building Manager", "General Manager"
+- Over generic roles like "Administrative Assistant" or "Receptionist"
+
+Look in tenant services pages (marked with TENANT PAGE comments) for these specific contacts.
+"""
         return prompt
 
-    def parse_contact_info(self, html: str, company_name: str, is_law_firm: bool = False) -> Optional[Dict]:
+    def parse_contact_info(self, html: str, company_name: str, is_law_firm: bool = False, is_office_building: bool = False) -> Optional[Dict]:
         """
         Parse contact information from HTML using GPT-4o-mini
 
@@ -147,6 +174,7 @@ Return "lawyers": [] only if truly no attorney information is found.
             html: HTML content
             company_name: Name of the company
             is_law_firm: If True, also extract lawyer/attorney information
+            is_office_building: If True, prioritize tenant engagement contacts
 
         Returns:
             Dictionary with extracted contact info or None if failed
@@ -155,8 +183,10 @@ Return "lawyers": [] only if truly no attorney information is found.
             logger.info(f"Parsing contact info for {company_name} using {self.model}")
             if is_law_firm:
                 logger.info(f"Law firm detected - also extracting attorney contacts")
+            if is_office_building:
+                logger.info(f"Office building detected - prioritizing tenant engagement contacts")
 
-            prompt = self.create_extraction_prompt(html, company_name, is_law_firm)
+            prompt = self.create_extraction_prompt(html, company_name, is_law_firm, is_office_building)
 
             # Call OpenAI API
             response = self.client.chat.completions.create(

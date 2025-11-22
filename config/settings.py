@@ -21,18 +21,25 @@ LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 LOG_FILE = 'logs/scraper.log'
 
 # File Paths
-INPUT_CSV = 'data/330Madison.csv'
+INPUT_CSV = 'data/330Madison.csv'  # All merchants
 OUTPUT_CSV = 'data/output_enriched.csv'
-PROGRESS_FILE = 'data/progress.json'
+PROGRESS_FILE = 'data/progress_test.json'
 
 # OpenAI Settings
 OPENAI_MODEL = 'gpt-4o-mini'
-OPENAI_MAX_TOKENS = 500
+OPENAI_MAX_TOKENS = 2000  # Increased for lawyer extraction with full contact details
 OPENAI_TEMPERATURE = 0.1  # Low temperature for more consistent outputs
+
+# Output Files
+LAWYERS_CSV = 'data/output_lawyers.csv'  # Separate file for lawyer contacts
 
 # Scraping Settings
 USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Contact Info Scraper/1.0'
 CONTACT_PAGE_KEYWORDS = ['contact', 'about', 'reach-us', 'get-in-touch']
+# Attorney/Law firm specific pages for lawyer contact extraction
+ATTORNEY_PAGE_KEYWORDS = ['attorneys', 'lawyers', 'our-team', 'professionals', 'people',
+                          'our-attorneys', 'our-lawyers', 'partners', 'associates', 'staff',
+                          'practice-areas', 'team', 'bio', 'profile']
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 

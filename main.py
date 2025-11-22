@@ -15,7 +15,7 @@ from utils.validators import calculate_quality_score
 from scrapers.google_places import GooglePlacesScraper
 from scrapers.website_scraper import WebsiteScraper
 from scrapers.llm_parser import LLMContactParser
-from config.settings import INPUT_CSV, OUTPUT_CSV, PROGRESS_FILE
+from config.settings import INPUT_CSV, OUTPUT_CSV, PROGRESS_FILE, LAWYERS_CSV
 
 
 def extract_name_from_email(email: str) -> Optional[str]:
@@ -59,6 +59,38 @@ def extract_name_from_email(email: str) -> Optional[str]:
                 return f"{first_name} {last_name}"
 
     return None
+
+
+def is_law_firm(company_name: str, company_type: str = '') -> bool:
+    """
+    Detect if a company is a law firm based on name and type
+
+    Args:
+        company_name: Name of the company
+        company_type: Type/category of the business
+
+    Returns:
+        True if likely a law firm
+    """
+    law_keywords = [
+        'law', 'legal', 'attorney', 'attorneys', 'lawyer', 'lawyers',
+        'llp', 'pllc', 'esq', 'esquire', 'counsel', 'advocates',
+        'litigation', 'practice', 'firm'
+    ]
+
+    combined = f"{company_name} {company_type}".lower()
+
+    # Check for common patterns
+    for keyword in law_keywords:
+        if keyword in combined:
+            return True
+
+    # Check for patterns like "Smith & Jones" or "Doe, Smith & Associates"
+    if ' & ' in company_name or ', ' in company_name:
+        if any(word in combined for word in ['llp', 'pllc', 'pc', 'pa', 'associates']):
+            return True
+
+    return False
 
 # Setup logging
 logger = setup_logger()
@@ -116,17 +148,21 @@ class ContactInfoScraper:
         logger.info(f"Processing: {company_name}")
         logger.info(f"{'='*60}")
 
-        # Check if already processed
+        # Check if already processed - use cached data
         if company_name in self.progress:
-            logger.info(f"Skipping {company_name} (already processed)")
+            logger.info(f"Using cached data for {company_name}")
             return self.progress[company_name]
 
         # Initialize result with original data
+        company_type = row.get('Type', '')
+        is_law = is_law_firm(company_name, company_type)
+
         result = {
             'name': company_name,
             'original_phone': row.get('Phone', ''),
             'original_address': address,
-            'type': row.get('Type', ''),
+            'type': company_type,
+            'is_law_firm': is_law,
             'stars': row.get('Starts', ''),  # Note: typo in original CSV
             'reviews': row.get('Reviews', ''),
             'website': None,
@@ -145,10 +181,14 @@ class ContactInfoScraper:
             'contact_person': None,
             'contact_title': None,
             'address': address,
+            'lawyers': [],  # For law firms - list of attorney contacts
             'quality_score': 0,
             'last_updated': datetime.now().isoformat(),
             'data_source': []
         }
+
+        if is_law:
+            logger.info(f"⚖️  Detected as law firm - will extract attorney contacts")
 
         # Step 1: Get website from Google Places
         logger.info("Step 1: Checking Google Places...")
@@ -165,16 +205,40 @@ class ContactInfoScraper:
         # Step 2: Scrape website if available
         if result['website']:
             logger.info(f"Step 2: Scraping website: {result['website']}")
-            scraped_data = self.web_scraper.scrape_multiple_pages(result['website'])
+            scraped_data = self.web_scraper.scrape_multiple_pages(result['website'], is_law_firm=is_law)
 
             if scraped_data:
                 logger.info(f"✓ Successfully scraped website ({len(scraped_data.get('pages_fetched', []))} pages)")
 
+                # Get lawyer profiles extracted by regex (for law firms)
+                if is_law and scraped_data.get('lawyers'):
+                    result['lawyers'] = scraped_data['lawyers']
+                    logger.info(f"✓ Found {len(result['lawyers'])} attorneys via regex extraction")
+
                 # Step 3: Parse with LLM
                 logger.info("Step 3: Parsing with LLM...")
+                # For law firms, prioritize attorney page content
+                if is_law:
+                    # Put attorney pages first so they don't get cut off
+                    full_html = scraped_data.get('full_html', '')
+                    # Find attorney page sections and move them to front
+                    attorney_marker = '<!-- ATTORNEY PAGE:'
+                    if attorney_marker in full_html:
+                        parts = full_html.split(attorney_marker)
+                        # First part is homepage/contact, rest are attorney pages
+                        non_attorney = parts[0]
+                        attorney_pages = [attorney_marker + p for p in parts[1:]]
+                        # Put attorney pages first, then other content
+                        html_for_llm = '\n'.join(attorney_pages) + '\n' + non_attorney
+                    else:
+                        html_for_llm = full_html
+                else:
+                    html_for_llm = scraped_data['html']
+
                 contact_info = self.llm_parser.parse_contact_info(
-                    scraped_data['html'],
-                    company_name
+                    html_for_llm,
+                    company_name,
+                    is_law_firm=is_law
                 )
 
                 if contact_info:
@@ -200,6 +264,34 @@ class ContactInfoScraper:
 
                     if contact_info.get('phone_secondary'):
                         result['phone_secondary'] = contact_info['phone_secondary']
+
+                    # Merge LLM-extracted lawyers with regex-extracted ones
+                    if is_law and contact_info.get('lawyers'):
+                        llm_lawyers = contact_info['lawyers']
+                        # LLM lawyers are preferred - they have better contact info
+                        # Merge with regex lawyers, preferring LLM data
+                        merged_lawyers = {}
+
+                        # First add regex-extracted lawyers
+                        for lawyer in result['lawyers']:
+                            name = lawyer.get('name', '').lower()
+                            if name:
+                                merged_lawyers[name] = lawyer
+
+                        # Then merge/override with LLM lawyers (they have better data)
+                        for lawyer in llm_lawyers:
+                            name = lawyer.get('name', '').lower()
+                            if name:
+                                if name in merged_lawyers:
+                                    # Merge: LLM data takes priority
+                                    for key, value in lawyer.items():
+                                        if value:
+                                            merged_lawyers[name][key] = value
+                                else:
+                                    merged_lawyers[name] = lawyer
+
+                        result['lawyers'] = list(merged_lawyers.values())
+                        logger.info(f"✓ Total attorneys found: {len(result['lawyers'])}")
 
                     result['data_source'].append('llm_parser')
                     logger.info(f"✓ LLM parsing successful")
@@ -311,11 +403,37 @@ class ContactInfoScraper:
 
         # Create output DataFrame
         if results:
-            output_df = pd.DataFrame(results)
+            # Collect all lawyers for separate CSV
+            all_lawyers = []
 
-            # Reorder columns for better readability
+            # Make a copy for CSV output (don't modify cached data)
+            output_results = []
+            for result in results:
+                output_row = result.copy()
+                lawyers = output_row.get('lawyers', [])
+
+                # Add lawyers to separate list with company name
+                for lawyer in lawyers:
+                    lawyer_row = {
+                        'company_name': result['name'],
+                        'lawyer_name': lawyer.get('name'),
+                        'lawyer_title': lawyer.get('title'),
+                        'lawyer_email': lawyer.get('email'),
+                        'lawyer_phone': lawyer.get('phone'),
+                        'lawyer_linkedin': lawyer.get('linkedin')
+                    }
+                    all_lawyers.append(lawyer_row)
+
+                # Remove the lawyers list from main output
+                if 'lawyers' in output_row:
+                    del output_row['lawyers']
+                output_results.append(output_row)
+
+            output_df = pd.DataFrame(output_results)
+
+            # Reorder columns for better readability (no lawyer columns)
             column_order = [
-                'name', 'type', 'website',
+                'name', 'type', 'is_law_firm', 'website',
                 'email', 'email_contact_name', 'email_contact_title', 'email_secondary',
                 'phone', 'phone_contact_name', 'phone_contact_title', 'phone_secondary',
                 'address',
@@ -335,6 +453,15 @@ class ContactInfoScraper:
                 output_df.to_csv(OUTPUT_CSV, index=False)
                 logger.info(f"\n{'='*60}")
                 logger.info(f"✓ SUCCESS! Output saved to: {OUTPUT_CSV}")
+
+                # Save lawyers to separate CSV
+                if all_lawyers:
+                    lawyers_df = pd.DataFrame(all_lawyers)
+                    lawyers_df.to_csv(LAWYERS_CSV, index=False)
+                    logger.info(f"✓ Lawyers saved to: {LAWYERS_CSV} ({len(all_lawyers)} attorneys)")
+                else:
+                    logger.info(f"No lawyers to save")
+
                 logger.info(f"{'='*60}")
 
                 # Print summary statistics

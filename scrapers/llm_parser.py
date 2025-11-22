@@ -26,19 +26,21 @@ class LLMContactParser:
         self.client = OpenAI(api_key=api_key)
         self.model = OPENAI_MODEL
 
-    def create_extraction_prompt(self, html: str, company_name: str) -> str:
+    def create_extraction_prompt(self, html: str, company_name: str, is_law_firm: bool = False) -> str:
         """
         Create a prompt for extracting contact information
 
         Args:
             html: HTML content to parse
             company_name: Name of the company
+            is_law_firm: If True, also extract lawyer/attorney information
 
         Returns:
             Formatted prompt string
         """
         # Truncate HTML if too long (GPT-4o-mini has 128k context but we want to keep costs low)
-        max_html_length = 8000
+        # Increased for law firms to capture attorney page content with emails/phones
+        max_html_length = 25000 if is_law_firm else 8000
         if len(html) > max_html_length:
             html = html[:max_html_length] + "..."
 
@@ -102,23 +104,59 @@ IMPORTANT RULES:
 6. Verify that email addresses contain @ and valid domain extensions
 7. LinkedIn URLs should contain linkedin.com/company/ or linkedin.com/in/
 """
+
+        # Add lawyer extraction for law firms
+        if is_law_firm:
+            prompt += """
+
+CRITICAL - LAW FIRM LAWYER EXTRACTION:
+
+You MUST also extract a "lawyers" array containing up to 10 attorneys found in the HTML. This is REQUIRED for law firms.
+
+Add this field to your JSON response:
+
+"lawyers": [
+  {{
+    "name": "Full name of attorney",
+    "title": "Partner/Associate/Of Counsel/etc.",
+    "email": "direct email address (look for mailto: links)",
+    "phone": "direct phone number (look for tel: links)",
+    "linkedin": "personal LinkedIn URL"
+  }}
+]
+
+LAWYER EXTRACTION - SEARCH THOROUGHLY:
+1. Look for attorney/team/people pages in the HTML (marked with ATTORNEY PAGE comments)
+2. Find mailto: links and associate them with nearby names
+3. Find tel: links and associate them with nearby names
+4. Parse names from h2/h3/h4 tags, strong tags, or profile cards
+5. Look for patterns like "Partner", "Associate", "Of Counsel", "Attorney"
+6. Emails are often in format: firstname@domain.com or flastname@domain.com
+
+IMPORTANT: Even if company email wasn't found, lawyers may still have individual emails listed. Search for ALL mailto: links in the entire HTML.
+
+Return "lawyers": [] only if truly no attorney information is found.
+"""
         return prompt
 
-    def parse_contact_info(self, html: str, company_name: str) -> Optional[Dict]:
+    def parse_contact_info(self, html: str, company_name: str, is_law_firm: bool = False) -> Optional[Dict]:
         """
         Parse contact information from HTML using GPT-4o-mini
 
         Args:
             html: HTML content
             company_name: Name of the company
+            is_law_firm: If True, also extract lawyer/attorney information
 
         Returns:
             Dictionary with extracted contact info or None if failed
         """
         try:
             logger.info(f"Parsing contact info for {company_name} using {self.model}")
+            if is_law_firm:
+                logger.info(f"Law firm detected - also extracting attorney contacts")
 
-            prompt = self.create_extraction_prompt(html, company_name)
+            prompt = self.create_extraction_prompt(html, company_name, is_law_firm)
 
             # Call OpenAI API
             response = self.client.chat.completions.create(

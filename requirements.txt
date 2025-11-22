@@ -24,3 +24,6 @@ colorlog>=6.7.0
 
 # Optional: Google Places API
 googlemaps>=4.10.0
+
+# Headless browser for JS rendering
+playwright>=1.40.0

@@ -1,47 +1,27 @@
-# Multi-stage build for efficient image size
-FROM python:3.11-slim as builder
+# Use playwright base image for browser support
+FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
 
 # Set working directory
 WORKDIR /app
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Final stage
-FROM python:3.11-slim
-
-# Set working directory
-WORKDIR /app
-
-# Create non-root user for security
-RUN useradd -m -u 1000 scraper && \
-    chown -R scraper:scraper /app
-
-# Copy Python dependencies from builder
-COPY --from=builder /root/.local /home/scraper/.local
+# Install Playwright browsers
+RUN playwright install chromium
 
 # Copy application code
-COPY --chown=scraper:scraper . .
+COPY . .
 
 # Create necessary directories
-RUN mkdir -p /app/data /app/logs && \
-    chown -R scraper:scraper /app/data /app/logs
+RUN mkdir -p /app/data /app/logs
 
 # Set environment variables
-ENV PATH=/home/scraper/.local/bin:$PATH \
-    PYTHONUNBUFFERED=1 \
+ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
-
-# Switch to non-root user
-USER scraper
 
 # Default command
 CMD ["python", "main.py"]

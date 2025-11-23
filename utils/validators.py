@@ -38,6 +38,16 @@ def validate_phone(phone: Optional[str]) -> bool:
     if not phone:
         return False
 
+    # Handle non-string types (e.g., NaN from pandas)
+    if not isinstance(phone, str):
+        try:
+            phone = str(phone)
+            # Check if it's a NaN value
+            if phone.lower() == 'nan':
+                return False
+        except:
+            return False
+
     # Extract digits only
     digits = re.sub(r'\D', '', phone)
 

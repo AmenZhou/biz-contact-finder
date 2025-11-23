@@ -15,7 +15,7 @@ from utils.validators import calculate_quality_score
 from scrapers.google_places import GooglePlacesScraper
 from scrapers.website_scraper import WebsiteScraper
 from scrapers.llm_parser import LLMContactParser
-from config.settings import INPUT_CSV, OUTPUT_CSV, PROGRESS_FILE, LAWYERS_CSV, OFFICE_BUILDING_KEYWORDS
+from config.settings import INPUT_CSV, OUTPUT_CSV, PROGRESS_FILE, LAWYERS_CSV, OFFICE_BUILDING_KEYWORDS, BUILDING_CONTACTS_CSV
 
 
 def extract_name_from_email(email: str) -> Optional[str]:
@@ -286,7 +286,7 @@ class ContactInfoScraper:
             Dictionary with enriched contact information
         """
         company_name = row['Name']
-        address = row.get('Addr', '')
+        address = row.get('Address', '') or row.get('Addr', '')
 
         logger.info(f"\n{'='*60}")
         logger.info(f"Processing: {company_name}")
@@ -344,7 +344,10 @@ class ContactInfoScraper:
         if google_info:
             result['website'] = google_info.get('website')
             result['phone'] = google_info.get('phone') or result['original_phone']
-            result['address'] = google_info.get('address') or address
+            # Keep original address - don't replace with Google's (may return wrong branch location)
+            # Only use Google's address if original is empty
+            if not address and google_info.get('address'):
+                result['address'] = google_info.get('address')
             result['data_source'].append('google_places')
             logger.info(f"✓ Found website: {result['website']}")
         else:
@@ -527,10 +530,14 @@ class ContactInfoScraper:
         logger.info(f"Input file: {INPUT_CSV}")
         logger.info(f"Output file: {OUTPUT_CSV}")
 
-        # Load input CSV
+        # Load input CSV or Excel
         try:
-            df = pd.read_csv(INPUT_CSV)
-            logger.info(f"Loaded {len(df)} companies from CSV")
+            if INPUT_CSV.endswith('.xlsx') or INPUT_CSV.endswith('.xls'):
+                df = pd.read_excel(INPUT_CSV)
+                logger.info(f"Loaded {len(df)} companies from Excel")
+            else:
+                df = pd.read_csv(INPUT_CSV)
+                logger.info(f"Loaded {len(df)} companies from CSV")
         except Exception as e:
             logger.error(f"Failed to load input CSV: {e}")
             return
@@ -542,29 +549,17 @@ class ContactInfoScraper:
 
         # Process each company
         results = []
+        all_lawyers = []  # Track lawyers incrementally
+        all_building_contacts = []  # Track building contacts incrementally
+
         for idx, row in df.iterrows():
             try:
                 result = self.process_company(row)
                 results.append(result)
-            except Exception as e:
-                logger.error(f"Error processing company at row {idx}: {e}", exc_info=True)
-                continue
 
-        # Create output DataFrame
-        if results:
-            # Collect all lawyers for separate CSV
-            all_lawyers = []
-
-            # Make a copy for CSV output (don't modify cached data)
-            output_results = []
-            for result in results:
-                output_row = result.copy()
-                lawyers = output_row.get('lawyers', [])
-
-                # Filter out invalid lawyer entries (menu items, etc.)
+                # Extract and save lawyers incrementally
+                lawyers = result.get('lawyers', [])
                 lawyers = filter_valid_lawyers(lawyers)
-
-                # Add lawyers to separate list with company name
                 for lawyer in lawyers:
                     lawyer_row = {
                         'company_name': result['name'],
@@ -575,6 +570,40 @@ class ContactInfoScraper:
                         'lawyer_linkedin': lawyer.get('linkedin')
                     }
                     all_lawyers.append(lawyer_row)
+
+                # Save lawyers incrementally after each company with lawyers
+                if lawyers:
+                    self.save_lawyers_incrementally(all_lawyers)
+
+                # Extract building contacts for office buildings
+                if result.get('is_office_building'):
+                    building_contact = {
+                        'building_name': result['name'],
+                        'contact_name': result.get('email_contact_name') or result.get('contact_person'),
+                        'contact_title': result.get('email_contact_title') or result.get('contact_title'),
+                        'email': result.get('email'),
+                        'email_secondary': result.get('email_secondary'),
+                        'phone': result.get('phone'),
+                        'phone_secondary': result.get('phone_secondary'),
+                        'linkedin': result.get('linkedin'),
+                        'instagram': result.get('instagram'),
+                        'website': result.get('website'),
+                        'address': result.get('address')
+                    }
+                    all_building_contacts.append(building_contact)
+                    # Save building contacts incrementally
+                    self.save_building_contacts_incrementally(all_building_contacts)
+
+            except Exception as e:
+                logger.error(f"Error processing company at row {idx}: {e}", exc_info=True)
+                continue
+
+        # Create output DataFrame
+        if results:
+            # Make a copy for CSV output (don't modify cached data)
+            output_results = []
+            for result in results:
+                output_row = result.copy()
 
                 # Remove the lawyers list from main output
                 if 'lawyers' in output_row:
@@ -606,18 +635,28 @@ class ContactInfoScraper:
                 logger.info(f"\n{'='*60}")
                 logger.info(f"✓ SUCCESS! Output saved to: {OUTPUT_CSV}")
 
-                # Save lawyers to separate CSV
+                # Final save of lawyers (already saved incrementally, but ensure final state)
                 if all_lawyers:
-                    lawyers_df = pd.DataFrame(all_lawyers)
-                    lawyers_df.to_csv(LAWYERS_CSV, index=False)
+                    self.save_lawyers_incrementally(all_lawyers)
                     logger.info(f"✓ Lawyers saved to: {LAWYERS_CSV} ({len(all_lawyers)} attorneys)")
                 else:
                     logger.info(f"No lawyers to save")
+
+                # Final save of building contacts
+                if all_building_contacts:
+                    self.save_building_contacts_incrementally(all_building_contacts)
+                    logger.info(f"✓ Building contacts saved to: {BUILDING_CONTACTS_CSV} ({len(all_building_contacts)} buildings)")
+                else:
+                    logger.info(f"No building contacts to save")
 
                 logger.info(f"{'='*60}")
 
                 # Print summary statistics
                 self.print_summary(output_df)
+
+                # Verify output files
+                verification = self.verify_output_files(len(all_lawyers), len(all_building_contacts))
+                self.print_verification_report(verification, len(all_lawyers), len(all_building_contacts))
 
             except Exception as e:
                 logger.error(f"Failed to save output CSV: {e}")
@@ -638,13 +677,210 @@ class ContactInfoScraper:
         logger.info(f"Average quality score: {df['quality_score'].mean():.1f}/100")
         logger.info(f"{'='*60}\n")
 
+    def save_lawyers_incrementally(self, all_lawyers: list):
+        """Save lawyers to CSV file incrementally"""
+        if all_lawyers:
+            try:
+                lawyers_df = pd.DataFrame(all_lawyers)
+                Path(LAWYERS_CSV).parent.mkdir(parents=True, exist_ok=True)
+                lawyers_df.to_csv(LAWYERS_CSV, index=False)
+                logger.debug(f"Saved {len(all_lawyers)} lawyers to {LAWYERS_CSV}")
+            except Exception as e:
+                logger.error(f"Failed to save lawyers CSV: {e}")
+
+    def save_building_contacts_incrementally(self, all_building_contacts: list):
+        """Save building contacts to CSV file incrementally"""
+        if all_building_contacts:
+            try:
+                contacts_df = pd.DataFrame(all_building_contacts)
+                Path(BUILDING_CONTACTS_CSV).parent.mkdir(parents=True, exist_ok=True)
+                contacts_df.to_csv(BUILDING_CONTACTS_CSV, index=False)
+                logger.debug(f"Saved {len(all_building_contacts)} building contacts to {BUILDING_CONTACTS_CSV}")
+            except Exception as e:
+                logger.error(f"Failed to save building contacts CSV: {e}")
+
+    def verify_output_files(self, lawyers_count: int, building_contacts_count: int = 0) -> dict:
+        """
+        Verify that all expected output files were created
+
+        Args:
+            lawyers_count: Number of lawyers that should have been saved
+            building_contacts_count: Number of building contacts that should have been saved
+
+        Returns:
+            Dictionary with verification results
+        """
+        results = {
+            'merchants_csv': False,
+            'progress_json': False,
+            'lawyers_csv': False,
+            'building_contacts_csv': False,
+            'lawyers_expected': lawyers_count > 0,
+            'building_contacts_expected': building_contacts_count > 0,
+            'all_passed': False,
+            'missing_files': []
+        }
+
+        # Check merchants CSV
+        if Path(OUTPUT_CSV).exists():
+            results['merchants_csv'] = True
+        else:
+            results['missing_files'].append(OUTPUT_CSV)
+
+        # Check progress JSON
+        if Path(PROGRESS_FILE).exists():
+            results['progress_json'] = True
+        else:
+            results['missing_files'].append(PROGRESS_FILE)
+
+        # Check lawyers CSV only if lawyers were found
+        if lawyers_count > 0:
+            if Path(LAWYERS_CSV).exists():
+                results['lawyers_csv'] = True
+            else:
+                results['missing_files'].append(LAWYERS_CSV)
+        else:
+            # No lawyers expected, so this passes
+            results['lawyers_csv'] = True
+
+        # Check building contacts CSV only if building contacts were found
+        if building_contacts_count > 0:
+            if Path(BUILDING_CONTACTS_CSV).exists():
+                results['building_contacts_csv'] = True
+            else:
+                results['missing_files'].append(BUILDING_CONTACTS_CSV)
+        else:
+            # No building contacts expected, so this passes
+            results['building_contacts_csv'] = True
+
+        # Determine if all passed
+        results['all_passed'] = (
+            results['merchants_csv'] and
+            results['progress_json'] and
+            results['lawyers_csv'] and
+            results['building_contacts_csv']
+        )
+
+        return results
+
+    def print_verification_report(self, verification: dict, lawyers_count: int, building_contacts_count: int = 0):
+        """Print verification report"""
+        logger.info("\n🔍 OUTPUT VERIFICATION")
+        logger.info(f"{'='*60}")
+
+        status_merchants = "✓" if verification['merchants_csv'] else "✗"
+        status_progress = "✓" if verification['progress_json'] else "✗"
+        status_lawyers = "✓" if verification['lawyers_csv'] else "✗"
+        status_building = "✓" if verification['building_contacts_csv'] else "✗"
+
+        logger.info(f"{status_merchants} Merchants CSV: {OUTPUT_CSV}")
+        logger.info(f"{status_progress} Progress JSON: {PROGRESS_FILE}")
+
+        if lawyers_count > 0:
+            logger.info(f"{status_lawyers} Lawyers CSV: {LAWYERS_CSV} ({lawyers_count} attorneys)")
+        else:
+            logger.info(f"{status_lawyers} Lawyers CSV: Not required (no law firms with attorneys found)")
+
+        if building_contacts_count > 0:
+            logger.info(f"{status_building} Building Contacts CSV: {BUILDING_CONTACTS_CSV} ({building_contacts_count} buildings)")
+        else:
+            logger.info(f"{status_building} Building Contacts CSV: Not required (no office buildings found)")
+
+        if verification['all_passed']:
+            logger.info(f"\n✅ All output files verified successfully!")
+        else:
+            logger.error(f"\n❌ Verification FAILED! Missing files:")
+            for f in verification['missing_files']:
+                logger.error(f"   - {f}")
+
+        logger.info(f"{'='*60}\n")
+
+        return verification['all_passed']
+
 
 def main():
-    """Entry point"""
-    scraper = ContactInfoScraper()
+    """Entry point with auto-verification and rescue mechanism"""
+    max_retries = 2
+    retry_count = 0
 
-    # Process all companies
-    scraper.run()  # Full batch
+    while retry_count < max_retries:
+        scraper = ContactInfoScraper()
+
+        # Process all companies
+        scraper.run()
+
+        # Check if we need to retry
+        # Get lawyers and building contacts count from progress
+        lawyers_count = 0
+        building_contacts_count = 0
+        for company_name, data in scraper.progress.items():
+            lawyers = data.get('lawyers', [])
+            lawyers = filter_valid_lawyers(lawyers)
+            lawyers_count += len(lawyers)
+            if data.get('is_office_building'):
+                building_contacts_count += 1
+
+        # Verify output files
+        verification = scraper.verify_output_files(lawyers_count, building_contacts_count)
+
+        if verification['all_passed']:
+            logger.info("✅ Scraper completed successfully with all files verified!")
+            break
+        else:
+            retry_count += 1
+            if retry_count < max_retries:
+                logger.warning(f"\n⚠️  Verification failed. Attempting rescue (retry {retry_count}/{max_retries-1})...")
+
+                # Identify problematic entries and rescue
+                for missing_file in verification['missing_files']:
+                    if 'lawyers' in missing_file:
+                        logger.info("Investigating missing lawyers file...")
+                        # Force a re-save of lawyers
+                        all_lawyers = []
+                        for company_name, data in scraper.progress.items():
+                            lawyers = data.get('lawyers', [])
+                            lawyers = filter_valid_lawyers(lawyers)
+                            for lawyer in lawyers:
+                                lawyer_row = {
+                                    'company_name': company_name,
+                                    'lawyer_name': lawyer.get('name'),
+                                    'lawyer_title': lawyer.get('title'),
+                                    'lawyer_email': lawyer.get('email'),
+                                    'lawyer_phone': lawyer.get('phone'),
+                                    'lawyer_linkedin': lawyer.get('linkedin')
+                                }
+                                all_lawyers.append(lawyer_row)
+
+                        if all_lawyers:
+                            scraper.save_lawyers_incrementally(all_lawyers)
+                            logger.info(f"Rescued lawyers file with {len(all_lawyers)} attorneys")
+
+                    if 'building_contacts' in missing_file:
+                        logger.info("Investigating missing building contacts file...")
+                        # Force a re-save of building contacts
+                        all_building_contacts = []
+                        for company_name, data in scraper.progress.items():
+                            if data.get('is_office_building'):
+                                building_contact = {
+                                    'building_name': data['name'],
+                                    'contact_name': data.get('email_contact_name') or data.get('contact_person'),
+                                    'contact_title': data.get('email_contact_title') or data.get('contact_title'),
+                                    'email': data.get('email'),
+                                    'email_secondary': data.get('email_secondary'),
+                                    'phone': data.get('phone'),
+                                    'phone_secondary': data.get('phone_secondary'),
+                                    'linkedin': data.get('linkedin'),
+                                    'instagram': data.get('instagram'),
+                                    'website': data.get('website'),
+                                    'address': data.get('address')
+                                }
+                                all_building_contacts.append(building_contact)
+
+                        if all_building_contacts:
+                            scraper.save_building_contacts_incrementally(all_building_contacts)
+                            logger.info(f"Rescued building contacts file with {len(all_building_contacts)} buildings")
+            else:
+                logger.error(f"\n❌ Scraper failed after {max_retries} attempts. Please check the logs.")
 
 
 if __name__ == '__main__':

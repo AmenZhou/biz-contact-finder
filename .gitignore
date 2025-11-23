@@ -13,8 +13,7 @@ ENV/
 .venv
 
 # Data files
-data/progress.json
-data/output_enriched.csv
+data
 *.xlsx
 *.csv
 

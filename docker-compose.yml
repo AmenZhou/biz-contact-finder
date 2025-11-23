@@ -13,9 +13,9 @@ services:
       - ./logs:/app/logs
       # Optional: Mount source code for development (comment out for production)
       # - ./scrapers:/app/scrapers
-      # - ./utils:/app/utils
-      # - ./config:/app/config
-      # - ./main.py:/app/main.py
+      - ./utils:/app/utils
+      - ./config:/app/config
+      - ./main.py:/app/main.py
     restart: unless-stopped
     # Uncomment to limit resources
     # deploy:

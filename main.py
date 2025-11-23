@@ -61,6 +61,124 @@ def extract_name_from_email(email: str) -> Optional[str]:
     return None
 
 
+def is_valid_lawyer_name(name: str) -> bool:
+    """
+    Validate if a string is likely a real person's name (not a menu item or generic text)
+
+    Args:
+        name: The name string to validate
+
+    Returns:
+        True if it appears to be a valid person name
+    """
+    if not name:
+        return False
+
+    name_lower = name.lower().strip()
+
+    # List of invalid names (navigation items, generic text, etc.)
+    invalid_names = [
+        'resource centers', 'resources', 'podcasts', 'blogs', 'videos',
+        'news', 'events', 'insights', 'publications', 'articles',
+        'contact', 'contact us', 'about', 'about us', 'home', 'careers',
+        'services', 'practice areas', 'industries', 'locations', 'offices',
+        'people', 'attorneys', 'lawyers', 'team', 'our team', 'leadership',
+        'learn more', 'read more', 'view more', 'see all', 'view all',
+        'subscribe', 'search', 'menu', 'navigation', 'footer', 'header',
+        'privacy', 'terms', 'legal', 'disclaimer', 'sitemap',
+        'esq.', 'esq', 'attorney', 'lawyer', 'partner', 'associate',
+        'contact information', 'get in touch', 'reach us'
+    ]
+
+    # Check exact matches
+    if name_lower in invalid_names:
+        return False
+
+    # Check if name is too short (likely abbreviation or single word)
+    if len(name_lower) < 3:
+        return False
+
+    # Check if name is too long (likely article title or description)
+    # Most real names are under 50 characters
+    if len(name) > 50:
+        return False
+
+    # Check for patterns that indicate article/publication titles
+    article_patterns = [
+        'agreement', 'trade', 'investment', 'report', 'news', 'daily',
+        'season', 'annual', 'proxy', 'platform', 'consumer', 'pricing',
+        'collaboration', 'era', 'bilateral', 'what\'s', 'how to', 'guide',
+        'update', 'alert', 'bulletin', 'release', 'announcement',
+        'summit', 'conference', 'webinar', 'seminar', 'workshop'
+    ]
+    for pattern in article_patterns:
+        if pattern in name_lower:
+            return False
+
+    # Check if name contains colons (common in article titles)
+    if ':' in name:
+        return False
+
+    # Check if name contains question marks (article titles)
+    if '?' in name:
+        return False
+
+    # Check if name contains numbers that look like dates (e.g., "21 November 2025")
+    import re
+    if re.search(r'\d{1,2}\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}', name_lower):
+        return False
+    if re.search(r'\d{4}', name):  # Contains a year
+        return False
+
+    # Check if name is just a single word without spaces (except for some valid single names)
+    words = name.split()
+    if len(words) == 1:
+        # Single word names are usually invalid unless they're proper names
+        # Most valid lawyer names have at least first and last name
+        if name_lower in invalid_names or len(name_lower) < 4:
+            return False
+
+    # Check for common invalid patterns
+    invalid_patterns = [
+        'learn more', 'read more', 'view', 'click', 'download',
+        'subscribe', 'sign up', 'register', 'login', 'log in'
+    ]
+    for pattern in invalid_patterns:
+        if pattern in name_lower:
+            return False
+
+    # Valid names typically have at least 2 words (first + last name)
+    # Or contain a period (like "J. Smith") or comma (like "Smith, John")
+    if len(words) < 2 and '.' not in name and ',' not in name:
+        # Exception: some valid single-word entries might be last names only
+        # But most invalid entries are also single words
+        return False
+
+    # Names with more than 5 words are likely sentences/titles, not names
+    if len(words) > 5:
+        return False
+
+    return True
+
+
+def filter_valid_lawyers(lawyers: list) -> list:
+    """
+    Filter out invalid lawyer entries from a list
+
+    Args:
+        lawyers: List of lawyer dictionaries
+
+    Returns:
+        Filtered list with only valid lawyer entries
+    """
+    valid_lawyers = []
+    for lawyer in lawyers:
+        name = lawyer.get('name', '')
+        if is_valid_lawyer_name(name):
+            valid_lawyers.append(lawyer)
+    return valid_lawyers
+
+
 def is_law_firm(company_name: str, company_type: str = '') -> bool:
     """
     Detect if a company is a law firm based on name and type
@@ -442,6 +560,9 @@ class ContactInfoScraper:
             for result in results:
                 output_row = result.copy()
                 lawyers = output_row.get('lawyers', [])
+
+                # Filter out invalid lawyer entries (menu items, etc.)
+                lawyers = filter_valid_lawyers(lawyers)
 
                 # Add lawyers to separate list with company name
                 for lawyer in lawyers:

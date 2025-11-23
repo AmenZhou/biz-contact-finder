@@ -21,9 +21,14 @@ LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 LOG_FILE = 'logs/scraper.log'
 
 # File Paths
-INPUT_CSV = 'data/330Madison.csv'  # All merchants
-OUTPUT_CSV = 'data/output_all_merchants.csv'
-PROGRESS_FILE = 'data/progress_test.json'
+INPUT_CSV = 'data/1221_6th.csv'  # All merchants
+
+# Extract prefix from input filename (e.g., "330Madison" from "330Madison.csv")
+import os as _os
+OUTPUT_PREFIX = _os.path.splitext(_os.path.basename(INPUT_CSV))[0]
+
+OUTPUT_CSV = f'data/{OUTPUT_PREFIX}_merchants.csv'
+PROGRESS_FILE = f'data/{OUTPUT_PREFIX}_progress.json'
 
 # OpenAI Settings
 OPENAI_MODEL = 'gpt-4o-mini'
@@ -31,7 +36,8 @@ OPENAI_MAX_TOKENS = 2000  # Increased for lawyer extraction with full contact de
 OPENAI_TEMPERATURE = 0.1  # Low temperature for more consistent outputs
 
 # Output Files
-LAWYERS_CSV = 'data/output_lawyers.csv'  # Separate file for lawyer contacts
+LAWYERS_CSV = f'data/{OUTPUT_PREFIX}_lawyers.csv'  # Separate file for lawyer contacts
+BUILDING_CONTACTS_CSV = f'data/{OUTPUT_PREFIX}_building_contacts.csv'  # Building management contacts
 
 # Scraping Settings
 USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Contact Info Scraper/1.0'

@@ -15,6 +15,7 @@ from utils.validators import calculate_quality_score
 from scrapers.google_places import GooglePlacesScraper
 from scrapers.website_scraper import WebsiteScraper
 from scrapers.llm_parser import LLMContactParser
+from scrapers.hunter_scraper import HunterScraper
 from config.settings import INPUT_CSV, OUTPUT_CSV, PROGRESS_FILE, LAWYERS_CSV, OFFICE_BUILDING_KEYWORDS, BUILDING_CONTACTS_CSV
 
 
@@ -250,8 +251,18 @@ class ContactInfoScraper:
         self.google_scraper = GooglePlacesScraper()
         self.web_scraper = WebsiteScraper()
         self.llm_parser = LLMContactParser()
+        self.hunter_scraper = HunterScraper()
 
         self.progress = self.load_progress()
+
+    def cleanup(self):
+        """Clean up resources, especially browser instances"""
+        if hasattr(self, 'hunter_scraper') and self.hunter_scraper:
+            try:
+                self.hunter_scraper.close()
+                logger.debug("Cleaned up HunterScraper resources")
+            except Exception as e:
+                logger.warning(f"Error cleaning up HunterScraper: {e}")
 
     def load_progress(self) -> Dict:
         """Load progress from previous runs"""
@@ -328,6 +339,8 @@ class ContactInfoScraper:
             'contact_title': None,
             'address': address,
             'lawyers': [],  # For law firms - list of attorney contacts
+            'company_size': None,  # Employee count range
+            'company_type_hunter': None,  # Industry/type from Hunter.io
             'quality_score': 0,
             'last_updated': datetime.now().isoformat(),
             'data_source': []
@@ -352,6 +365,24 @@ class ContactInfoScraper:
             logger.info(f"✓ Found website: {result['website']}")
         else:
             logger.info("✗ No Google Places data found")
+
+        # Step 1.5: Get company size from Hunter.io or LinkedIn
+        if result['website']:
+            logger.info("Step 1.5: Checking Hunter.io for company size...")
+            hunter_info = self.hunter_scraper.get_company_info(result['website'])
+            if hunter_info:
+                if hunter_info.get('company_size'):
+                    result['company_size'] = hunter_info['company_size']
+                if hunter_info.get('company_type'):
+                    result['company_type_hunter'] = hunter_info['company_type']
+                if hunter_info.get('company_size') or hunter_info.get('company_type'):
+                    result['data_source'].append('hunter_io')
+                else:
+                    logger.info("✗ No company size/type found from Hunter.io")
+            else:
+                logger.info("✗ No Hunter.io data found")
+
+        # LinkedIn fallback for company size will be attempted after we have the LinkedIn URL
 
         # Step 2: Scrape website if available
         if result['website']:
@@ -509,6 +540,27 @@ class ContactInfoScraper:
         else:
             logger.info("Step 2-3: Skipped (no website)")
 
+        # Step 4: LinkedIn fallback for company size if not found from Hunter.io
+        if not result.get('company_size') and result.get('linkedin'):
+            # Check if it's a company LinkedIn URL (not personal)
+            linkedin_url = result['linkedin']
+            if '/company/' in linkedin_url:
+                logger.info("Step 4: Checking LinkedIn for company size...")
+                linkedin_info = self.hunter_scraper.get_company_size_from_linkedin(linkedin_url)
+                if linkedin_info:
+                    linkedin_data_found = False
+                    if linkedin_info.get('company_size'):
+                        result['company_size'] = linkedin_info['company_size']
+                        linkedin_data_found = True
+                    if linkedin_info.get('company_type') and not result.get('company_type_hunter'):
+                        result['company_type_hunter'] = linkedin_info['company_type']
+                        linkedin_data_found = True
+                    # Add 'linkedin' to data_source if any data was found (company_size OR company_type)
+                    if linkedin_data_found and 'linkedin' not in result['data_source']:
+                        result['data_source'].append('linkedin')
+            else:
+                logger.debug("LinkedIn URL is personal profile, skipping company size lookup")
+
         # Calculate quality score
         result['quality_score'] = calculate_quality_score(result)
         logger.info(f"Quality Score: {result['quality_score']}/100")
@@ -614,7 +666,7 @@ class ContactInfoScraper:
 
             # Reorder columns for better readability (no lawyer columns)
             column_order = [
-                'name', 'type', 'is_law_firm', 'website',
+                'name', 'type', 'is_law_firm', 'company_size', 'company_type_hunter', 'website',
                 'email', 'email_contact_name', 'email_contact_title', 'email_secondary',
                 'phone', 'phone_contact_name', 'phone_contact_title', 'phone_secondary',
                 'address',
@@ -662,6 +714,9 @@ class ContactInfoScraper:
                 logger.error(f"Failed to save output CSV: {e}")
         else:
             logger.warning("No results to save")
+        
+        # Clean up resources
+        self.cleanup()
 
     def print_summary(self, df: pd.DataFrame):
         """Print summary statistics"""
@@ -805,9 +860,13 @@ def main():
 
     while retry_count < max_retries:
         scraper = ContactInfoScraper()
-
-        # Process all companies
-        scraper.run()
+        
+        try:
+            # Process all companies
+            scraper.run()
+        finally:
+            # Ensure cleanup happens even if run() fails
+            scraper.cleanup()
 
         # Check if we need to retry
         # Get lawyers and building contacts count from progress

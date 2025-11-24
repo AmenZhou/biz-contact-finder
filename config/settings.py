@@ -21,7 +21,7 @@ LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 LOG_FILE = 'logs/scraper.log'
 
 # File Paths
-INPUT_CSV = 'data/1221_6th.csv'  # All merchants
+INPUT_CSV = 'data/477 Madison Ave.xlsx'  # All merchants
 
 # Extract prefix from input filename (e.g., "330Madison" from "330Madison.csv")
 import os as _os
@@ -59,6 +59,15 @@ TENANT_PAGE_KEYWORDS = ['tenant', 'tenants', 'tenant-services', 'amenities', 'bu
                         'concierge', 'services', 'building-team', 'management-team']
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
+
+# Area #9 (Chelsea/NoMad) Geographic Boundaries
+AREA_9_BOUNDS = {
+    'north': 40.7505,   # ~34th Street
+    'south': 40.7425,   # ~23rd Street
+    'west': -73.9950,   # ~7th Avenue
+    'east': -73.9875    # ~Broadway
+}
+AREA_9_PHARMACIES_CSV = 'data/area9_pharmacies.csv'
 
 # Validation Patterns
 EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'

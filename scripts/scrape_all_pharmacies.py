@@ -62,17 +62,16 @@ def save_district_results(district_num: int, pharmacies: List[Dict], district_na
         output_file.touch()
         return
 
-    # Sort by rating (descending), handling None values
+    # Sort by name (alphabetically) since rating field removed for cost optimization
     pharmacies_sorted = sorted(
         pharmacies,
-        key=lambda x: float(x.get('rating') or 0),
-        reverse=True
+        key=lambda x: (x.get('name') or '').lower()
     )
 
-    # Write to CSV
+    # Write to CSV (removed rating/total_ratings fields for cost optimization)
     fieldnames = [
         'district_num', 'district_name', 'name', 'address', 'phone', 'website',
-        'google_maps_url', 'rating', 'total_ratings', 'business_status',
+        'google_maps_url', 'business_status',
         'is_open_now', 'hours', 'latitude', 'longitude', 'place_id', 'types'
     ]
 
@@ -128,14 +127,12 @@ def scrape_district(district_num: int, district_info: Dict, scraper: PharmacyScr
 
     # Method 2: Text search for major chains
     print(f"\n  [2/2] Running text search for major chains...")
-    text_search_queries = []
-
-    # Generic pharmacy search
-    text_search_queries.append(f"pharmacy near {center['lat']},{center['lng']}")
-
-    # Major chain searches
-    for chain in MAJOR_CHAINS:
-        text_search_queries.append(f"{chain} near {center['lat']},{center['lng']}")
+    # Optimized text searches (reduced from 6 to 2 for cost savings)
+    # Grid search already provides comprehensive coverage
+    text_search_queries = [
+        f"pharmacy near {center['lat']},{center['lng']}",  # Generic search
+        f"CVS Duane Reade near {center['lat']},{center['lng']}",  # Major chain (CVS owns Duane Reade)
+    ]
 
     text_results_count = 0
     for query in text_search_queries:
@@ -199,15 +196,16 @@ def consolidate_results():
     pharmacies_list = list(unique_pharmacies.values())
 
     # Sort by district number, then rating
+    # Sort by district number, then name (rating removed for cost optimization)
     pharmacies_sorted = sorted(
         pharmacies_list,
-        key=lambda x: (int(x.get('district_num', 999)), -float(x.get('rating', 0)))
+        key=lambda x: (int(x.get('district_num', 999)), (x.get('name') or '').lower())
     )
 
-    # Write consolidated CSV
+    # Write consolidated CSV (removed rating/total_ratings for cost optimization)
     fieldnames = [
         'district_num', 'district_name', 'name', 'address', 'phone', 'website',
-        'google_maps_url', 'rating', 'total_ratings', 'business_status',
+        'google_maps_url', 'business_status',
         'is_open_now', 'hours', 'latitude', 'longitude', 'place_id', 'types'
     ]
 

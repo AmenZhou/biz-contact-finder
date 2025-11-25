@@ -7,7 +7,8 @@ Creates placemarks for each pharmacy with detailed information.
 import csv
 import zipfile
 from pathlib import Path
-from xml.etree.ElementTree import Element, SubElement, ElementTree
+from xml.etree import ElementTree as ET
+from xml.etree.ElementTree import Element, SubElement
 from xml.dom import minidom
 
 
@@ -215,7 +216,7 @@ def export_to_kml(input_csv: Path, output_kml: Path) -> int:
     print(f"\nWriting KML file to: {output_kml}")
 
     # Convert to string with pretty print
-    rough_string = ElementTree.tostring(kml, encoding='utf-8')
+    rough_string = ET.tostring(kml, encoding='utf-8')
     reparsed = minidom.parseString(rough_string)
     pretty_xml = reparsed.toprettyxml(indent='  ', encoding='utf-8')
 

@@ -223,13 +223,14 @@ class PharmacyScraper:
 
             try:
                 # Get detailed information
+                # Optimized fields for Enterprise tier (removed rating, user_ratings_total, price_level)
+                # Saves $5/1000 requests vs Enterprise+Atmosphere tier
                 details = self.client.place(
                     place_id=place_id,
                     fields=[
                         'name', 'formatted_address', 'formatted_phone_number',
-                        'website', 'url', 'rating', 'user_ratings_total',
-                        'opening_hours', 'business_status', 'geometry',
-                        'type', 'price_level'
+                        'website', 'url', 'opening_hours', 'business_status',
+                        'geometry', 'type'
                     ]
                 )
 
@@ -241,8 +242,6 @@ class PharmacyScraper:
                     'phone': result.get('formatted_phone_number'),
                     'website': result.get('website'),
                     'google_maps_url': result.get('url'),
-                    'rating': result.get('rating'),
-                    'total_ratings': result.get('user_ratings_total'),
                     'business_status': result.get('business_status'),
                     'place_id': place_id,
                     'latitude': result.get('geometry', {}).get('location', {}).get('lat'),

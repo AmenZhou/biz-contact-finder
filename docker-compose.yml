@@ -12,7 +12,8 @@ services:
       # Mount logs directory for log persistence
       - ./logs:/app/logs
       # Optional: Mount source code for development (comment out for production)
-      # - ./scrapers:/app/scrapers
+      - ./scrapers:/app/scrapers
+      - ./scripts:/app/scripts
       - ./utils:/app/utils
       - ./config:/app/config
       - ./main.py:/app/main.py

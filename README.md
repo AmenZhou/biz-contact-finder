@@ -317,5 +317,229 @@ For questions or issues:
 
 ---
 
-**Last Updated:** November 18, 2024
-**Version:** 1.0
+## Scripts Reference
+
+### Pharmacy Scraping
+
+#### `scripts/scrape_all_pharmacies.py`
+**Purpose**: Scrape all NYC pharmacies using Google Places API
+**Output**: `data/pharmacy_results.csv`
+**Run**: `docker-compose run --rm scraper python scripts/scrape_all_pharmacies.py`
+**Notes**: Main pharmacy scraper, uses Google Places API + web scraping for contact details
+
+#### `scripts/scrape_pharmacies_area9.py`
+**Purpose**: Scrape pharmacies in specific geographic area (Area 9)
+**Output**: `data/area9_pharmacies.csv`
+**Run**: `docker-compose run --rm scraper python scripts/scrape_pharmacies_area9.py`
+**Notes**: Specialized script for testing specific area boundaries
+
+#### `scripts/convert_pharmacies_to_kml.py`
+**Purpose**: Convert pharmacy CSV data to KML/KMZ format for Google Maps
+**Input**: `data/pharmacy_results.csv`
+**Output**: `data/pharmacies.kml`, `data/pharmacies.kmz`
+**Run**: `python3 scripts/convert_pharmacies_to_kml.py`
+**Notes**: Creates interactive map with pharmacy markers and contact popups
+
+---
+
+### Building Tenant Scraping (Lower Manhattan Office Buildings)
+
+#### Complete 4-Step Workflow
+
+**Step 1: Get Building Coordinates**
+```bash
+docker-compose run --rm scraper python scripts/scrape_office_buildings.py
+```
+- **Purpose**: Scrape office building coordinates in Lower Manhattan
+- **Output**: `v2_lower_manhattan_tenants/data/lower_manhattan_office_buildings.csv`
+- **Notes**: Uses Google Places API to find ~324 office buildings
+
+**Step 2: Scrape Tenant Directories**
+```bash
+docker-compose run --rm scraper python scripts/scrape_building_tenants_phase1.py
+```
+- **Purpose**: Extract tenant directories from each building
+- **Output**: Creates 3 CSV files per building:
+  - `data/{building}_merchants.csv` - Businesses/merchants
+  - `data/{building}_lawyers.csv` - Law firms and attorneys
+  - `data/{building}_building_contacts.csv` - Building management
+- **Notes**: Uses Hunter.io API + LLM parsing; processes all 324 buildings
+
+**Step 3: Enrich Contact Data** (Optional but recommended)
+```bash
+docker-compose run --rm scraper python scripts/enrich_top_buildings.py
+```
+- **Purpose**: Enrich top 25 buildings with missing contact info (emails, phones, LinkedIn)
+- **Input**: Existing CSV files in `data/` directory
+- **Output**: Updates all `*_merchants.csv`, `*_lawyers.csv`, `*_building_contacts.csv`
+- **Duration**: 6-8 hours for 25 buildings (~20-30 sec per tenant)
+- **Method**: Serper.dev API (Google Search) → Web scraping → OpenAI LLM extraction
+- **Progress**: Saved to `data/enrichment_progress.json` (can resume if interrupted)
+
+**Step 4: Generate Google Maps KMZ**
+```bash
+cd v2_lower_manhattan_tenants
+python3 scripts/export_tenants_to_kmz.py
+```
+- **Purpose**: Create KMZ file with all enriched tenant data
+- **Input**:
+  - `v2_lower_manhattan_tenants/data/lower_manhattan_office_buildings.csv`
+  - All tenant CSV files from `data/` directory
+- **Output**:
+  - `v2_lower_manhattan_tenants/data/lower_manhattan_tenants.kml`
+  - `v2_lower_manhattan_tenants/data/lower_manhattan_tenants.kmz` (upload this)
+- **Upload to**: https://mymaps.google.com
+- **Features**: Color-coded markers by tenant density, interactive popups with full contact details
+
+---
+
+### Data Processing & Utilities
+
+#### `scripts/consolidate_results.py`
+**Purpose**: Merge multiple CSV result files into single consolidated file
+**Run**: `python3 scripts/consolidate_results.py`
+
+#### `scripts/parse_districts.py`
+**Purpose**: Parse and process NYC district geographic boundaries
+**Run**: `python3 scripts/parse_districts.py`
+**Notes**: Used for area-based pharmacy scraping
+
+#### `scripts/manage_cache.py`
+**Purpose**: Manage API response cache to reduce costs
+**Run**: `python3 scripts/manage_cache.py [stats|clear|view]`
+**Notes**: Cache responses to avoid duplicate API calls
+
+#### `scripts/populate_cache_from_csv.py`
+**Purpose**: Pre-populate cache from existing CSV data
+**Run**: `python3 scripts/populate_cache_from_csv.py`
+**Notes**: Bootstrap cache from previous scraping runs
+
+---
+
+### Legacy/Duplicate Scripts ⚠️
+
+**The following scripts in `v2_lower_manhattan_tenants/scripts/` are duplicates.**
+**Use the versions in main `scripts/` folder instead:**
+
+- ❌ `v2_lower_manhattan_tenants/scripts/enrich_top_buildings.py`
+  ✅ **USE**: `scripts/enrich_top_buildings.py` (Docker-compatible with env vars)
+
+- ❌ `v2_lower_manhattan_tenants/scripts/scrape_building_tenants_phase1.py`
+  ✅ **USE**: `scripts/scrape_building_tenants_phase1.py`
+
+- ❌ `v2_lower_manhattan_tenants/scripts/scrape_office_buildings.py`
+  ✅ **USE**: `scripts/scrape_office_buildings.py`
+
+**Exception** (no duplicate, use this one):
+- ✅ `v2_lower_manhattan_tenants/scripts/export_tenants_to_kmz.py` - Only KMZ export script
+
+**Why duplicates exist**: V2 scripts had import issues in Docker. Fixed versions are in main `scripts/` folder using environment variables instead of config imports.
+
+---
+
+## Environment Variables
+
+Required API keys (set in `.env` file):
+
+```bash
+# Required for all scripts
+OPENAI_API_KEY=your_key_here           # OpenAI for LLM parsing
+GOOGLE_PLACES_API_KEY=your_key_here    # Google Places API
+
+# Required for enrichment (Step 3)
+SERPER_API_KEY=your_key_here           # Serper.dev for Google Search
+HUNTER_API_KEY=your_key_here           # Hunter.io for email finding
+```
+
+---
+
+## Data Output Structure
+
+### Main Data Directory: `data/`
+
+**Tenant CSV Files** (per building):
+- `{building_address}_merchants.csv` - Merchants and businesses
+- `{building_address}_lawyers.csv` - Law firms and attorneys
+- `{building_address}_building_contacts.csv` - Building management contacts
+
+**Pharmacy Data**:
+- `pharmacy_results.csv` - All NYC pharmacies
+- `area9_pharmacies.csv` - Area 9 pharmacies
+
+**Progress Files**:
+- `enrichment_progress.json` - Enrichment script progress (allows resume)
+
+### V2 Data Directory: `v2_lower_manhattan_tenants/data/`
+
+- `lower_manhattan_office_buildings.csv` - Building coordinates (~324 buildings)
+- `lower_manhattan_tenants.kml` - KML for Google Maps
+- `lower_manhattan_tenants.kmz` - Compressed KML (final deliverable)
+
+---
+
+## CSV Output Schema
+
+### Merchants CSV
+```
+name, type, is_law_firm, website, email, email_secondary, phone, phone_secondary,
+address, linkedin, twitter, facebook, instagram, contact_person, contact_title,
+stars, reviews, quality_score, data_source, last_updated
+```
+
+### Lawyers CSV
+```
+lawyer_name, lawyer_title, company_name, lawyer_email, lawyer_phone,
+lawyer_linkedin, practice_areas, bar_admissions, years_experience,
+address, quality_score, data_source, last_updated
+```
+
+### Building Contacts CSV
+```
+building_name, name, contact_name, contact_title, email, phone, website,
+address, company_type, quality_score, data_source, last_updated
+```
+
+---
+
+## Common Command Patterns
+
+### Full Building Tenant Pipeline
+```bash
+# 1. Get building coordinates
+docker-compose run --rm scraper python scripts/scrape_office_buildings.py
+
+# 2. Scrape tenant directories (all 324 buildings)
+docker-compose run --rm scraper python scripts/scrape_building_tenants_phase1.py
+
+# 3. Enrich top 25 buildings (6-8 hours)
+docker-compose run --rm scraper python scripts/enrich_top_buildings.py
+
+# 4. Generate KMZ file
+cd v2_lower_manhattan_tenants && python3 scripts/export_tenants_to_kmz.py
+```
+
+### Pharmacy Pipeline
+```bash
+# Scrape all NYC pharmacies
+docker-compose run --rm scraper python scripts/scrape_all_pharmacies.py
+
+# Convert to KMZ
+python3 scripts/convert_pharmacies_to_kml.py
+```
+
+### Cache Management
+```bash
+# View cache stats
+python3 scripts/manage_cache.py stats
+
+# Clear cache
+python3 scripts/manage_cache.py clear
+
+# Pre-populate from CSV
+python3 scripts/populate_cache_from_csv.py
+```
+
+---
+
+**Last Updated:** November 26, 2024
+**Version:** 2.0

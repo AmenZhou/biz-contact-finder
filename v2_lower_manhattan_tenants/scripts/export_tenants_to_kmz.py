@@ -343,16 +343,17 @@ def export_to_kmz() -> None:
         tenants = load_tenant_data(building['address'])
         tenant_count = len(tenants['merchants']) + len(tenants['lawyers'])
 
-        if tenant_count > 0:
-            buildings_with_data += 1
-            total_tenants += tenant_count
-        else:
+        # Skip buildings with no tenants (only show buildings with actual merchants/lawyers)
+        if tenant_count == 0:
             buildings_without_data += 1
+            continue
 
-        # Create placemark (even for buildings without data)
+        # Only create placemark for buildings with tenant data
+        buildings_with_data += 1
+        total_tenants += tenant_count
         create_building_placemark(document, building, tenants)
 
-    print(f"   Complete: {len(buildings)} placemarks created")
+    print(f"   Complete: {buildings_with_data} placemarks created (skipped {buildings_without_data} buildings with no data)")
 
     # Save KML
     print("\n4. Saving KML file...")

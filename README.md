@@ -15,7 +15,7 @@ Automated tool to extract company contact information (websites, emails, phone n
 ## Project Structure
 
 ```
-sy_promotion_merchants_craw/
+sy_promotion_merchant_scraper/
 ├── README.md              # This file
 ├── PLAN.md               # Detailed project plan
 ├── requirements.txt      # Python dependencies
@@ -30,9 +30,15 @@ sy_promotion_merchants_craw/
 │   ├── validators.py    # Validation utilities
 │   └── logger.py        # Logging setup
 ├── main.py              # Main script
-└── data/
-    ├── 330Madison.csv   # Input file
-    └── output_enriched.csv # Output file
+├── scripts/
+│   ├── building_tenants/  # Office building tenant scraping
+│   ├── pharmacies/        # Pharmacy scraping
+│   └── utils/            # Utility scripts
+├── data/
+│   ├── building_tenants/ # Building tenant data
+│   ├── pharmacies/       # Pharmacy data
+│   └── district_18/      # District 18 data
+└── docs/                 # Documentation
 ```
 
 ## Setup
@@ -321,23 +327,23 @@ For questions or issues:
 
 ### Pharmacy Scraping
 
-#### `scripts/scrape_all_pharmacies.py`
+#### `scripts/pharmacies/scrape_all_pharmacies.py`
 **Purpose**: Scrape all NYC pharmacies using Google Places API
-**Output**: `data/pharmacy_results.csv`
-**Run**: `docker-compose run --rm scraper python scripts/scrape_all_pharmacies.py`
+**Output**: `data/pharmacies/pharmacy_results.csv`
+**Run**: `docker-compose run --rm scraper python scripts/pharmacies/scrape_all_pharmacies.py`
 **Notes**: Main pharmacy scraper, uses Google Places API + web scraping for contact details
 
-#### `scripts/scrape_pharmacies_area9.py`
+#### `scripts/pharmacies/scrape_pharmacies_area9.py`
 **Purpose**: Scrape pharmacies in specific geographic area (Area 9)
-**Output**: `data/area9_pharmacies.csv`
-**Run**: `docker-compose run --rm scraper python scripts/scrape_pharmacies_area9.py`
+**Output**: `data/pharmacies/area9_pharmacies.csv`
+**Run**: `docker-compose run --rm scraper python scripts/pharmacies/scrape_pharmacies_area9.py`
 **Notes**: Specialized script for testing specific area boundaries
 
-#### `scripts/convert_pharmacies_to_kml.py`
+#### `scripts/pharmacies/export_pharmacies_to_kmz.py`
 **Purpose**: Convert pharmacy CSV data to KML/KMZ format for Google Maps
-**Input**: `data/pharmacy_results.csv`
-**Output**: `data/pharmacies.kml`, `data/pharmacies.kmz`
-**Run**: `python3 scripts/convert_pharmacies_to_kml.py`
+**Input**: `data/pharmacies/pharmacy_results.csv`
+**Output**: `data/pharmacies/exports/pharmacies.kml`, `data/pharmacies/exports/pharmacies.kmz`
+**Run**: `python3 scripts/pharmacies/export_pharmacies_to_kmz.py`
 **Notes**: Creates interactive map with pharmacy markers and contact popups
 
 ---
@@ -348,92 +354,85 @@ For questions or issues:
 
 **Step 1: Get Building Coordinates**
 ```bash
-docker-compose run --rm scraper python scripts/scrape_office_buildings.py
+docker-compose run --rm scraper python scripts/building_tenants/01_scrape_office_buildings.py
 ```
 - **Purpose**: Scrape office building coordinates in Lower Manhattan
-- **Output**: `v2_lower_manhattan_tenants/data/lower_manhattan_office_buildings.csv`
+- **Output**: `data/building_tenants/buildings/lower_manhattan_office_buildings.csv`
 - **Notes**: Uses Google Places API to find ~324 office buildings
 
 **Step 2: Scrape Tenant Directories**
 ```bash
-docker-compose run --rm scraper python scripts/scrape_building_tenants_phase1.py
+docker-compose run --rm scraper python scripts/building_tenants/02_scrape_tenant_directories.py
 ```
 - **Purpose**: Extract tenant directories from each building
-- **Output**: Creates 3 CSV files per building:
-  - `data/{building}_merchants.csv` - Businesses/merchants
-  - `data/{building}_lawyers.csv` - Law firms and attorneys
-  - `data/{building}_building_contacts.csv` - Building management
+- **Output**: Creates 3 CSV files per building in `data/building_tenants/tenants/lower_manhattan/`:
+  - `{building}_merchants.csv` - Businesses/merchants
+  - `{building}_lawyers.csv` - Law firms and attorneys
+  - `{building}_building_contacts.csv` - Building management
 - **Notes**: Uses Hunter.io API + LLM parsing; processes all 324 buildings
 
 **Step 3: Enrich Contact Data** (Optional but recommended)
 ```bash
-docker-compose run --rm scraper python scripts/enrich_top_buildings.py
+docker-compose run --rm scraper python scripts/building_tenants/03_enrich_contacts.py
 ```
-- **Purpose**: Enrich top 25 buildings with missing contact info (emails, phones, LinkedIn)
-- **Input**: Existing CSV files in `data/` directory
+- **Purpose**: Enrich buildings with missing contact info (emails, phones, LinkedIn)
+- **Input**: Existing CSV files in `data/building_tenants/tenants/lower_manhattan/`
 - **Output**: Updates all `*_merchants.csv`, `*_lawyers.csv`, `*_building_contacts.csv`
 - **Duration**: 6-8 hours for 25 buildings (~20-30 sec per tenant)
 - **Method**: Serper.dev API (Google Search) → Web scraping → OpenAI LLM extraction
-- **Progress**: Saved to `data/enrichment_progress.json` (can resume if interrupted)
+- **Progress**: Saved to `data/building_tenants/progress/enrichment_progress.json` (can resume if interrupted)
+- **Options**:
+  - `--top-n 25` - Enrich top N buildings by tenant count
+  - `--buildings-file path/to/file.txt` - Enrich specific buildings from file
 
 **Step 4: Generate Google Maps KMZ**
 ```bash
-cd v2_lower_manhattan_tenants
-python3 scripts/export_tenants_to_kmz.py
+python3 scripts/building_tenants/04_export_to_kmz.py
 ```
 - **Purpose**: Create KMZ file with all enriched tenant data
 - **Input**:
-  - `v2_lower_manhattan_tenants/data/lower_manhattan_office_buildings.csv`
-  - All tenant CSV files from `data/` directory
+  - `data/building_tenants/buildings/lower_manhattan_office_buildings.csv`
+  - All tenant CSV files from `data/building_tenants/tenants/lower_manhattan/`
 - **Output**:
-  - `v2_lower_manhattan_tenants/data/lower_manhattan_tenants.kml`
-  - `v2_lower_manhattan_tenants/data/lower_manhattan_tenants.kmz` (upload this)
+  - `data/building_tenants/exports/lower_manhattan_tenants.kml`
+  - `data/building_tenants/exports/lower_manhattan_tenants.kmz` (upload this)
 - **Upload to**: https://mymaps.google.com
 - **Features**: Color-coded markers by tenant density, interactive popups with full contact details
+
+**District 9 Special Export**
+```bash
+# Get District 9 building coordinates
+python3 scripts/building_tenants/district9_get_coordinates.py
+
+# Export District 9 to KMZ (with building management prominently displayed)
+python3 scripts/building_tenants/district9_export_to_kmz.py
+```
+- **Output**: `data/building_tenants/exports/district9_tenants.kmz`
+- **Buildings**: 6 premium buildings (330 Madison, 1221 6th Ave, 477/485/488 Madison, 499 Park)
+- **Features**: Building management contacts displayed first, enriched tenant data
 
 ---
 
 ### Data Processing & Utilities
 
-#### `scripts/consolidate_results.py`
+#### `scripts/utils/consolidate_results.py`
 **Purpose**: Merge multiple CSV result files into single consolidated file
-**Run**: `python3 scripts/consolidate_results.py`
+**Run**: `python3 scripts/utils/consolidate_results.py`
 
-#### `scripts/parse_districts.py`
+#### `scripts/utils/parse_districts.py`
 **Purpose**: Parse and process NYC district geographic boundaries
-**Run**: `python3 scripts/parse_districts.py`
+**Run**: `python3 scripts/utils/parse_districts.py`
 **Notes**: Used for area-based pharmacy scraping
 
-#### `scripts/manage_cache.py`
+#### `scripts/utils/manage_cache.py`
 **Purpose**: Manage API response cache to reduce costs
-**Run**: `python3 scripts/manage_cache.py [stats|clear|view]`
+**Run**: `python3 scripts/utils/manage_cache.py [stats|clear|view]`
 **Notes**: Cache responses to avoid duplicate API calls
 
-#### `scripts/populate_cache_from_csv.py`
+#### `scripts/utils/populate_cache_from_csv.py`
 **Purpose**: Pre-populate cache from existing CSV data
-**Run**: `python3 scripts/populate_cache_from_csv.py`
+**Run**: `python3 scripts/utils/populate_cache_from_csv.py`
 **Notes**: Bootstrap cache from previous scraping runs
-
----
-
-### Legacy/Duplicate Scripts ⚠️
-
-**The following scripts in `v2_lower_manhattan_tenants/scripts/` are duplicates.**
-**Use the versions in main `scripts/` folder instead:**
-
-- ❌ `v2_lower_manhattan_tenants/scripts/enrich_top_buildings.py`
-  ✅ **USE**: `scripts/enrich_top_buildings.py` (Docker-compatible with env vars)
-
-- ❌ `v2_lower_manhattan_tenants/scripts/scrape_building_tenants_phase1.py`
-  ✅ **USE**: `scripts/scrape_building_tenants_phase1.py`
-
-- ❌ `v2_lower_manhattan_tenants/scripts/scrape_office_buildings.py`
-  ✅ **USE**: `scripts/scrape_office_buildings.py`
-
-**Exception** (no duplicate, use this one):
-- ✅ `v2_lower_manhattan_tenants/scripts/export_tenants_to_kmz.py` - Only KMZ export script
-
-**Why duplicates exist**: V2 scripts had import issues in Docker. Fixed versions are in main `scripts/` folder using environment variables instead of config imports.
 
 ---
 
@@ -455,25 +454,36 @@ HUNTER_API_KEY=your_key_here           # Hunter.io for email finding
 
 ## Data Output Structure
 
-### Main Data Directory: `data/`
+### Building Tenants: `data/building_tenants/`
 
-**Tenant CSV Files** (per building):
-- `{building_address}_merchants.csv` - Merchants and businesses
-- `{building_address}_lawyers.csv` - Law firms and attorneys
-- `{building_address}_building_contacts.csv` - Building management contacts
+**Building Coordinates**:
+- `buildings/lower_manhattan_office_buildings.csv` - ~324 office buildings
+- `buildings/district9_buildings.csv` - 6 District 9 premium buildings
 
-**Pharmacy Data**:
-- `pharmacy_results.csv` - All NYC pharmacies
-- `area9_pharmacies.csv` - Area 9 pharmacies
+**Tenant Data** (per building):
+- `tenants/lower_manhattan/{building}_merchants.csv` - Merchants and businesses
+- `tenants/lower_manhattan/{building}_lawyers.csv` - Law firms and attorneys
+- `tenants/lower_manhattan/{building}_building_contacts.csv` - Building management
+- `tenants/district9/{building}_merchants.csv` - District 9 merchants
+- `tenants/district9/{building}_lawyers.csv` - District 9 lawyers
+- `tenants/district9/{building}_building_contacts.csv` - District 9 building mgmt
+
+**Exports**:
+- `exports/lower_manhattan_tenants.kml` - KML for Google Maps
+- `exports/lower_manhattan_tenants.kmz` - Compressed KML (final deliverable)
+- `exports/district9_tenants.kml` - District 9 KML
+- `exports/district9_tenants.kmz` - District 9 compressed KML
 
 **Progress Files**:
-- `enrichment_progress.json` - Enrichment script progress (allows resume)
+- `progress/enrichment_progress.json` - Enrichment script progress (allows resume)
+- `progress/targeted_buildings_51.txt` - List of buildings for targeted enrichment
 
-### V2 Data Directory: `v2_lower_manhattan_tenants/data/`
+### Pharmacies: `data/pharmacies/`
 
-- `lower_manhattan_office_buildings.csv` - Building coordinates (~324 buildings)
-- `lower_manhattan_tenants.kml` - KML for Google Maps
-- `lower_manhattan_tenants.kmz` - Compressed KML (final deliverable)
+- `pharmacy_results.csv` - All NYC pharmacies
+- `area9_pharmacies.csv` - Area 9 pharmacies
+- `exports/pharmacies.kml` - KML for Google Maps
+- `exports/pharmacies.kmz` - Compressed KML
 
 ---
 
@@ -506,40 +516,49 @@ address, company_type, quality_score, data_source, last_updated
 ### Full Building Tenant Pipeline
 ```bash
 # 1. Get building coordinates
-docker-compose run --rm scraper python scripts/scrape_office_buildings.py
+docker-compose run --rm scraper python scripts/building_tenants/01_scrape_office_buildings.py
 
 # 2. Scrape tenant directories (all 324 buildings)
-docker-compose run --rm scraper python scripts/scrape_building_tenants_phase1.py
+docker-compose run --rm scraper python scripts/building_tenants/02_scrape_tenant_directories.py
 
-# 3. Enrich top 25 buildings (6-8 hours)
-docker-compose run --rm scraper python scripts/enrich_top_buildings.py
+# 3. Enrich buildings with contact data (6-8 hours)
+docker-compose run --rm scraper python scripts/building_tenants/03_enrich_contacts.py
 
 # 4. Generate KMZ file
-cd v2_lower_manhattan_tenants && python3 scripts/export_tenants_to_kmz.py
+python3 scripts/building_tenants/04_export_to_kmz.py
+```
+
+### District 9 Premium Buildings Pipeline
+```bash
+# Get building coordinates
+python3 scripts/building_tenants/district9_get_coordinates.py
+
+# Export to KMZ
+python3 scripts/building_tenants/district9_export_to_kmz.py
 ```
 
 ### Pharmacy Pipeline
 ```bash
 # Scrape all NYC pharmacies
-docker-compose run --rm scraper python scripts/scrape_all_pharmacies.py
+docker-compose run --rm scraper python scripts/pharmacies/scrape_all_pharmacies.py
 
 # Convert to KMZ
-python3 scripts/convert_pharmacies_to_kml.py
+python3 scripts/pharmacies/export_pharmacies_to_kmz.py
 ```
 
 ### Cache Management
 ```bash
 # View cache stats
-python3 scripts/manage_cache.py stats
+python3 scripts/utils/manage_cache.py stats
 
 # Clear cache
-python3 scripts/manage_cache.py clear
+python3 scripts/utils/manage_cache.py clear
 
 # Pre-populate from CSV
-python3 scripts/populate_cache_from_csv.py
+python3 scripts/utils/populate_cache_from_csv.py
 ```
 
 ---
 
-**Last Updated:** November 26, 2024
-**Version:** 2.0
+**Last Updated:** November 27, 2024
+**Version:** 3.0 - Reorganized file structure

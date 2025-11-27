@@ -4,6 +4,7 @@ Contact Enrichment Script for Top Buildings
 Enriches merchant, lawyer, and building contact data with emails, phones, and contact info
 """
 
+import argparse
 import csv
 import json
 import os
@@ -16,19 +17,15 @@ from typing import Dict, List, Optional
 from bs4 import BeautifulSoup
 from openai import OpenAI
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from config.settings import SERPER_API_KEY, OPENAI_API_KEY
-
 # Configuration
 PROJECT_ROOT = Path(__file__).parent.parent
-DATA_DIR = PROJECT_ROOT.parent / "data"
-PROGRESS_FILE = PROJECT_ROOT / "data" / "enrichment_progress.json"
+DATA_DIR = Path("/app/data")  # Docker mount point
+PROGRESS_FILE = DATA_DIR / "enrichment_progress.json"
 TOP_N_BUILDINGS = 25
 
-# Initialize clients
-serper_api_key = SERPER_API_KEY or os.getenv('SERPER_API_KEY')
-openai_api_key = OPENAI_API_KEY or os.getenv('OPENAI_API_KEY')
+# Initialize clients from environment variables
+serper_api_key = os.getenv('SERPER_API_KEY')
+openai_api_key = os.getenv('OPENAI_API_KEY')
 
 if not serper_api_key:
     print("ERROR: SERPER_API_KEY not found")
@@ -60,6 +57,20 @@ def load_top_buildings(n: int = TOP_N_BUILDINGS) -> List[str]:
     print()
 
     return top_buildings
+
+
+def load_buildings_from_file(file_path: str) -> List[str]:
+    """Load building names from a text file (one per line)"""
+    buildings = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            # Skip empty lines and comments
+            if line and not line.startswith('#'):
+                buildings.append(line)
+
+    print(f"Loaded {len(buildings)} buildings from {file_path}")
+    return buildings
 
 
 def load_progress() -> Dict:
@@ -387,13 +398,23 @@ def enrich_building(building_name: str) -> Dict:
 
 def main():
     """Main enrichment process"""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Enrich building tenant contact data')
+    parser.add_argument('--buildings-file', help='File containing building names to enrich (one per line)')
+    parser.add_argument('--top-n', type=int, default=TOP_N_BUILDINGS, help=f'Number of top buildings to enrich (default: {TOP_N_BUILDINGS})')
+    args = parser.parse_args()
+
     print("="*60)
     print("CONTACT ENRICHMENT - TOP BUILDINGS")
     print("="*60)
     print()
 
-    # Load top buildings
-    top_buildings = load_top_buildings(TOP_N_BUILDINGS)
+    # Load buildings (either from file or top N)
+    if args.buildings_file:
+        top_buildings = load_buildings_from_file(args.buildings_file)
+    else:
+        top_buildings = load_top_buildings(args.top_n)
+
     print(f"Will enrich {len(top_buildings)} buildings\n")
 
     # Load progress

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Export Lower Manhattan Office Building Tenants to KMZ
-Creates interactive Google Maps KMZ file with clickable building markers
+Export District 9 Office Building Tenants to KMZ
+Creates interactive Google Maps KMZ file with building management info prominently displayed
 """
 
 import csv
@@ -14,39 +14,46 @@ from datetime import datetime
 
 
 # Paths
-PROJECT_ROOT = Path(__file__).parent.parent
-V2_DATA_DIR = PROJECT_ROOT / "data"
-# CSV files are saved in parent data directory by scraper
-MAIN_DATA_DIR = PROJECT_ROOT.parent / "data"
-BUILDINGS_CSV = V2_DATA_DIR / "lower_manhattan_office_buildings.csv"
-OUTPUT_KML = V2_DATA_DIR / "lower_manhattan_tenants.kml"
-OUTPUT_KMZ = V2_DATA_DIR / "lower_manhattan_tenants.kmz"
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+DATA_DIR = PROJECT_ROOT / "data" / "building_tenants"
+DISTRICT9_DATA_DIR = DATA_DIR / "tenants" / "district9"
+BUILDINGS_CSV = DATA_DIR / "buildings" / "district9_buildings.csv"
+OUTPUT_KML = DATA_DIR / "exports" / "district9_tenants.kml"
+OUTPUT_KMZ = DATA_DIR / "exports" / "district9_tenants.kmz"
 
 
 def load_building_data() -> List[Dict]:
-    """Load all building coordinates from CSV"""
+    """Load all District 9 building coordinates from CSV"""
     buildings = []
     with open(BUILDINGS_CSV, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Load all buildings - scraper already filtered for commercial/office
             buildings.append({
+                'name': row['building_name'],
                 'address': row['address'],
                 'lat': float(row['latitude']),
-                'lon': float(row['longitude']),
-                'levels': row.get('building_levels', 'N/A')
+                'lon': float(row['longitude'])
             })
     return buildings
 
 
-def load_tenant_data(building_address: str) -> Dict:
+def load_tenant_data(building_name: str) -> Dict:
     """
-    Load all tenant data for a building from CSV files
+    Load all tenant data for a building from District 9 CSV files
     Returns dict with merchants, lawyers, building_contacts
     """
-    # Sanitize filename - match scraper's naming convention
-    # Scraper creates files like: "28 Liberty Street New York NY_merchants.csv"
-    filename_base = building_address.replace(', ', ' ').replace(',', '')
+    # Mapping of building names to their actual CSV filename prefixes
+    filename_map = {
+        '330 Madison Avenue': '330Madison',
+        '1221 Avenue of the Americas': '1221_6th',
+        '477 Madison Avenue': '477 Madison Ave',
+        '485 Madison Avenue': '485_Madison_Ave',
+        '488 Madison Avenue': '488_Madison_Ave',
+        '499 Park Avenue': '499 Park Ave'
+    }
+
+    # Get the filename prefix for this building
+    filename_prefix = filename_map.get(building_name)
 
     result = {
         'merchants': [],
@@ -54,22 +61,25 @@ def load_tenant_data(building_address: str) -> Dict:
         'building_contacts': []
     }
 
-    # Try to load merchants (from main data directory where scraper saves them)
-    merchants_file = MAIN_DATA_DIR / f"{filename_base}_merchants.csv"
+    if not filename_prefix:
+        return result
+
+    # Try to load merchants
+    merchants_file = DISTRICT9_DATA_DIR / f"{filename_prefix}_merchants.csv"
     if merchants_file.exists():
         with open(merchants_file, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             result['merchants'] = list(reader)
 
     # Try to load lawyers
-    lawyers_file = MAIN_DATA_DIR / f"{filename_base}_lawyers.csv"
+    lawyers_file = DISTRICT9_DATA_DIR / f"{filename_prefix}_lawyers.csv"
     if lawyers_file.exists():
         with open(lawyers_file, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             result['lawyers'] = list(reader)
 
     # Try to load building contacts
-    contacts_file = MAIN_DATA_DIR / f"{filename_base}_building_contacts.csv"
+    contacts_file = DISTRICT9_DATA_DIR / f"{filename_prefix}_building_contacts.csv"
     if contacts_file.exists():
         with open(contacts_file, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
@@ -79,9 +89,9 @@ def load_tenant_data(building_address: str) -> Dict:
 
 
 def create_html_popup(building: Dict, tenants: Dict) -> str:
-    """Generate HTML popup content for a building"""
+    """Generate HTML popup content for a building with building management prominently displayed"""
+    name = building['name']
     address = building['address']
-    levels = building['levels']
 
     # Count totals
     total_merchants = len(tenants['merchants'])
@@ -89,21 +99,80 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
     total_contacts = len(tenants['building_contacts'])
     total_tenants = total_merchants + total_lawyers
 
-    # Start HTML
-    html = f'''<div style="font-family: Arial, sans-serif; max-width: 500px; font-size: 13px;">
-  <h3 style="color: #1a73e8; margin: 0 0 5px 0; font-size: 16px;">
-    🏢 {address}
-  </h3>
-  <p style="color: #666; margin: 5px 0; font-size: 12px;">
+    # Start HTML with building header
+    html = f'''<div style="font-family: Arial, sans-serif; max-width: 600px; font-size: 13px;">
+  <h2 style="color: #1a73e8; margin: 0 0 8px 0; font-size: 18px;">
+    🏢 {name}
+  </h2>
+  <p style="color: #666; margin: 5px 0 10px 0; font-size: 12px;">
     📍 {address}
   </p>
-  <hr style="border: 1px solid #ddd; margin: 10px 0;"/>
-
-  <p style="margin: 5px 0;"><b>Total Tenants:</b> {total_tenants}</p>
-  <p style="margin: 5px 0;"><b>Building Levels:</b> {levels}</p>
 '''
 
-    # Merchants Section
+    # ===========================
+    # BUILDING MANAGEMENT SECTION - PROMINENTLY DISPLAYED FIRST
+    # ===========================
+    if total_contacts > 0:
+        html += f'''
+  <div style="background: linear-gradient(135deg, #fff9e6 0%, #fff3cd 100%); border: 2px solid #f9a825; border-radius: 8px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(249,168,37,0.2);">
+    <h3 style="color: #d68000; margin: 0 0 12px 0; font-size: 17px; border-bottom: 2px solid #f9a825; padding-bottom: 8px;">
+      🏗️ BUILDING MANAGEMENT
+    </h3>
+'''
+        for contact in tenants['building_contacts']:
+            building_name_field = contact.get('building_name', '')
+            building_type = contact.get('building_type', '')
+            mgmt_company = contact.get('management_company', '')
+            contact_name = contact.get('contact_name', '')
+            contact_title = contact.get('contact_title', '')
+            contact_email = contact.get('contact_email', '')
+            contact_phone = contact.get('contact_phone', '')
+            tenant_email = contact.get('tenant_engagement_email', '')
+            main_phone = contact.get('main_phone', '')
+            website = contact.get('website', '')
+            portal = contact.get('tenant_portal', '')
+
+            # Management company section
+            if mgmt_company:
+                html += f'    <p style="margin: 5px 0; font-size: 15px; font-weight: bold; color: #d68000;">🏢 {mgmt_company}</p>\n'
+
+            if building_type:
+                html += f'    <p style="margin: 3px 0; font-size: 13px; color: #555;">Type: {building_type}</p>\n'
+
+            # Primary contact
+            if contact_name:
+                title_str = f" - {contact_title}" if contact_title else ""
+                html += f'    <p style="margin: 8px 0 3px 0; font-size: 14px; font-weight: bold; color: #333;">👤 {contact_name}{title_str}</p>\n'
+
+            # Contact information
+            if contact_email:
+                html += f'    <p style="margin: 3px 0; font-size: 13px;">📧 <a href="mailto:{contact_email}" style="color: #1a73e8; text-decoration: none;">{contact_email}</a></p>\n'
+            if contact_phone:
+                html += f'    <p style="margin: 3px 0; font-size: 13px;">📞 {contact_phone}</p>\n'
+
+            # Additional contact info
+            if tenant_email and tenant_email != contact_email:
+                html += f'    <p style="margin: 3px 0; font-size: 12px; color: #555;">📬 Tenant Engagement: <a href="mailto:{tenant_email}" style="color: #1a73e8;">{tenant_email}</a></p>\n'
+            if main_phone and main_phone != contact_phone:
+                html += f'    <p style="margin: 3px 0; font-size: 12px; color: #555;">☎️ Main Phone: {main_phone}</p>\n'
+
+            # Links
+            if website:
+                html += f'    <p style="margin: 5px 0 3px 0; font-size: 13px;">🌐 <a href="{website}" target="_blank" style="color: #1a73e8; font-weight: 500;">Building Website</a></p>\n'
+            if portal:
+                html += f'    <p style="margin: 3px 0; font-size: 13px;">🔐 <a href="{portal}" target="_blank" style="color: #1a73e8; font-weight: 500;">Tenant Portal</a></p>\n'
+
+        html += '  </div>\n'
+
+    # Add separator and tenant summary
+    html += f'''
+  <hr style="border: 1px solid #ddd; margin: 15px 0;"/>
+  <p style="margin: 10px 0; font-size: 14px; color: #333;"><b>Total Tenants:</b> {total_tenants}</p>
+'''
+
+    # ===========================
+    # MERCHANTS SECTION
+    # ===========================
     if total_merchants > 0:
         html += f'''
   <h4 style="color: #333; border-bottom: 2px solid #1a73e8; padding-bottom: 5px; margin-top: 15px; font-size: 14px;">
@@ -111,7 +180,7 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
   </h4>
   <div style="margin-left: 10px;">
 '''
-        for merchant in tenants['merchants'][:20]:  # Limit to 20 to avoid popup overflow
+        for merchant in tenants['merchants'][:20]:  # Limit to 20
             name = merchant.get('name', 'Unknown')
             website = merchant.get('website', '')
             email = merchant.get('email', '')
@@ -140,7 +209,9 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
 
         html += '  </div>\n'
 
-    # Law Firms Section
+    # ===========================
+    # LAW FIRMS SECTION
+    # ===========================
     if total_lawyers > 0:
         html += f'''
   <h4 style="color: #333; border-bottom: 2px solid #d32f2f; padding-bottom: 5px; margin-top: 15px; font-size: 14px;">
@@ -189,44 +260,11 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
 
         html += '  </div>\n'
 
-    # Building Management Section
-    if total_contacts > 0:
-        html += f'''
-  <h4 style="color: #333; border-bottom: 2px solid #f9a825; padding-bottom: 5px; margin-top: 15px; font-size: 14px;">
-    🏗️ Building Management
-  </h4>
-  <div style="margin-left: 10px;">
-'''
-        for contact in tenants['building_contacts'][:3]:  # Max 3 contacts
-            company = contact.get('name', 'Unknown')
-            contact_person = contact.get('contact_person', '')
-            contact_title = contact.get('contact_title', '')
-            email = contact.get('email', '')
-            phone = contact.get('phone', '')
-            website = contact.get('website', '')
-
-            html += f'    <div style="margin-bottom: 10px;">\n'
-            html += f'      <p style="margin: 2px 0; font-weight: bold;">{company}</p>\n'
-
-            if contact_person:
-                title_str = f" - {contact_title}" if contact_title else ""
-                html += f'      <p style="margin: 2px 0; font-size: 12px;">👤 {contact_person}{title_str}</p>\n'
-            if email:
-                html += f'      <p style="margin: 2px 0; font-size: 12px;">📧 {email}</p>\n'
-            if phone:
-                html += f'      <p style="margin: 2px 0; font-size: 12px;">📞 {phone}</p>\n'
-            if website:
-                html += f'      <p style="margin: 2px 0; font-size: 12px;">🌐 <a href="{website}" target="_blank">Website</a></p>\n'
-
-            html += '    </div>\n'
-
-        html += '  </div>\n'
-
     # No data message
     if total_tenants == 0 and total_contacts == 0:
         html += '''
   <p style="color: #999; font-style: italic; margin-top: 15px;">
-    No tenant data available for this building.
+    No data available for this building.
   </p>
 '''
 
@@ -234,8 +272,7 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
     html += f'''
   <hr style="border: 1px solid #ddd; margin-top: 15px;"/>
   <p style="font-size: 11px; color: #999; text-align: center; margin: 5px 0;">
-    Data scraped: {datetime.now().strftime('%Y-%m-%d')}<br/>
-    Generated by Phase 1 Web Scraping
+    District 9 Buildings - Data scraped: {datetime.now().strftime('%Y-%m-%d')}
   </p>
 </div>'''
 
@@ -244,11 +281,11 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
 
 def determine_marker_style(tenant_count: int) -> str:
     """Return style ID based on tenant count"""
-    if tenant_count >= 20:
+    if tenant_count >= 50:
         return "high-density"
-    elif tenant_count >= 10:
+    elif tenant_count >= 20:
         return "medium-density"
-    elif tenant_count >= 5:
+    elif tenant_count >= 10:
         return "low-density"
     else:
         return "minimal-data"
@@ -273,7 +310,7 @@ def create_kml_styles(doc: Element) -> None:
 
 def create_building_placemark(doc: Element, building: Dict, tenants: Dict) -> None:
     """Create KML placemark for a building"""
-    address = building['address']
+    name = building['name']
     lat = building['lat']
     lon = building['lon']
 
@@ -284,8 +321,8 @@ def create_building_placemark(doc: Element, building: Dict, tenants: Dict) -> No
     placemark = SubElement(doc, "Placemark")
 
     # Name
-    name = SubElement(placemark, "name")
-    name.text = address
+    name_elem = SubElement(placemark, "name")
+    name_elem.text = name
 
     # Description (HTML popup)
     description = SubElement(placemark, "description")
@@ -305,7 +342,7 @@ def create_building_placemark(doc: Element, building: Dict, tenants: Dict) -> No
 def export_to_kmz() -> None:
     """Main export function"""
     print("=" * 60)
-    print("EXPORTING TO KMZ")
+    print("DISTRICT 9 - EXPORTING TO KMZ")
     print("=" * 60)
 
     # Load buildings
@@ -320,10 +357,10 @@ def export_to_kmz() -> None:
 
     # Document info
     doc_name = SubElement(document, "name")
-    doc_name.text = "Lower Manhattan Office Building Tenants"
+    doc_name.text = "District 9 Office Building Tenants"
 
     doc_desc = SubElement(document, "description")
-    doc_desc.text = f"324 buildings with tenant directories - Scraped {datetime.now().strftime('%Y-%m-%d')}"
+    doc_desc.text = f"District 9 buildings with tenant directories and building management - Scraped {datetime.now().strftime('%Y-%m-%d')}"
 
     # Create styles
     print("   Creating marker styles...")
@@ -336,24 +373,24 @@ def export_to_kmz() -> None:
     total_tenants = 0
 
     for i, building in enumerate(buildings, 1):
-        if i % 50 == 0:
-            print(f"   Progress: {i}/{len(buildings)} buildings processed")
+        print(f"   Processing: {building['name']}")
 
         # Load tenant data
-        tenants = load_tenant_data(building['address'])
+        tenants = load_tenant_data(building['name'])
         tenant_count = len(tenants['merchants']) + len(tenants['lawyers'])
+        contact_count = len(tenants['building_contacts'])
 
-        # Skip buildings with no tenants (only show buildings with actual merchants/lawyers)
-        if tenant_count == 0:
+        # Create placemark for all buildings (even without tenants, if they have building management)
+        if tenant_count > 0 or contact_count > 0:
+            buildings_with_data += 1
+            total_tenants += tenant_count
+            create_building_placemark(document, building, tenants)
+            print(f"     ✓ {tenant_count} tenants, {contact_count} management contacts")
+        else:
             buildings_without_data += 1
-            continue
+            print(f"     ⚠ No data found")
 
-        # Only create placemark for buildings with tenant data
-        buildings_with_data += 1
-        total_tenants += tenant_count
-        create_building_placemark(document, building, tenants)
-
-    print(f"   Complete: {buildings_with_data} placemarks created (skipped {buildings_without_data} buildings with no data)")
+    print(f"   Complete: {buildings_with_data} placemarks created")
 
     # Save KML
     print("\n4. Saving KML file...")
@@ -375,7 +412,8 @@ def export_to_kmz() -> None:
     print(f"Buildings with Data: {buildings_with_data}")
     print(f"Buildings without Data: {buildings_without_data}")
     print(f"Total Tenants: {total_tenants}")
-    print(f"Average Tenants per Building: {total_tenants / max(buildings_with_data, 1):.1f}")
+    if buildings_with_data > 0:
+        print(f"Average Tenants per Building: {total_tenants / buildings_with_data:.1f}")
     print()
     print(f"Output File: {OUTPUT_KMZ}")
     print(f"File Size: {OUTPUT_KMZ.stat().st_size / 1024:.1f} KB")

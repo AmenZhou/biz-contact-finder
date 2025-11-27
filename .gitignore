@@ -16,9 +16,10 @@ ENV/
 data
 *.xlsx
 *.csv
+districts.json
 
 # Logs
-logs/*.log
+*.log
 
 # IDE
 .vscode/

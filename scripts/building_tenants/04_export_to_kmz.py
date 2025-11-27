@@ -255,11 +255,12 @@ def determine_marker_style(tenant_count: int) -> str:
 
 def create_kml_styles(doc: Element) -> None:
     """Create color-coded marker styles"""
+    # Using standard Google Maps colored dots - most reliable across platforms
     styles = [
-        ("high-density", "http://maps.google.com/mapfiles/kml/paddle/grn-circle.png"),
-        ("medium-density", "http://maps.google.com/mapfiles/kml/paddle/ylw-circle.png"),
-        ("low-density", "http://maps.google.com/mapfiles/kml/paddle/orange-circle.png"),
-        ("minimal-data", "http://maps.google.com/mapfiles/kml/paddle/wht-circle.png"),
+        ("high-density", "http://maps.google.com/mapfiles/ms/icons/green-dot.png"),  # Green
+        ("medium-density", "http://maps.google.com/mapfiles/ms/icons/yellow-dot.png"),  # Yellow
+        ("low-density", "http://maps.google.com/mapfiles/ms/icons/orange-dot.png"),  # Orange
+        ("minimal-data", "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"),  # Blue
     ]
 
     for style_id, icon_url in styles:

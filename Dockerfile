@@ -4,6 +4,18 @@ FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
 # Set working directory
 WORKDIR /app
 
+# Install GDAL and geospatial dependencies for geopandas/fiona
+RUN apt-get update && apt-get install -y \
+    gdal-bin \
+    libgdal-dev \
+    libspatialindex-dev \
+    python3-dev \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set GDAL environment variables
+ENV GDAL_CONFIG=/usr/bin/gdal-config
+
 # Copy requirements first for better caching
 COPY requirements.txt .
 

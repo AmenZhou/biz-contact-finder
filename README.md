@@ -4,6 +4,7 @@ Automated tool to extract company contact information (websites, emails, phone n
 
 ## Features
 
+### Core Scraping
 - 🔍 **Google Places API** integration for official websites
 - 🌐 **Intelligent web scraping** with BeautifulSoup
 - 🤖 **LLM-powered parsing** using GPT-4o-mini for accurate extraction
@@ -11,6 +12,138 @@ Automated tool to extract company contact information (websites, emails, phone n
 - 📊 **Progress tracking** with incremental saves
 - 🛡️ **Rate limiting** and retry logic
 - 📝 **Comprehensive logging**
+
+### Building Tenant Analysis
+- 🏢 **District 18 & 9 Office Buildings** - Complete tenant directory scraping
+- 👥 **Building Management Contacts** - Automated extraction and enrichment
+- 📍 **Google Maps KMZ Export** - Interactive maps with color-coded markers
+- 🗂️ **CSV Consolidation** - Combined contact exports for easy access
+
+### Census Data Visualization
+- 🗺️ **Income Choropleth Maps** - Brooklyn & Queens median household income
+- 📊 **Census Tract Analysis** - 1,530 tracts with color-coded income levels
+- 🎨 **Google My Maps Compatible** - Properly formatted KML/KMZ exports
+- 💾 **Windows Excel Compatible** - UTF-8 BOM encoding for all CSV exports
+
+## System Architecture
+
+The following diagram illustrates the complete data pipeline for building contact information scraping, from input Excel files through to final KMZ and CSV outputs:
+
+```mermaid
+graph TB
+    subgraph "Input Data Sources"
+        A[Excel/CSV Files<br/>Building Addresses] --> B[Building Coordinates]
+        A1[District 18: 18.xlsx<br/>91 buildings] --> B
+        A2[District 9: 6 buildings<br/>Madison Ave area] --> B
+        A3[Lower Manhattan<br/>324 buildings] --> B
+    end
+
+    subgraph "Step 1: Building Geocoding"
+        B --> C[Google Places API]
+        C --> D[Building CSV<br/>Name, Address, Lat/Lng]
+    end
+
+    subgraph "Step 2: Tenant Directory Scraping"
+        D --> E[Serper.dev API<br/>Google Search]
+        E --> F[Web Scraping<br/>BeautifulSoup]
+        F --> G[OpenAI GPT-4o-mini<br/>LLM Parsing]
+        G --> H{Tenant Type<br/>Classification}
+        H -->|Merchants| I[merchants.csv<br/>Businesses, Restaurants]
+        H -->|Lawyers| J[lawyers.csv<br/>Law Firms, Attorneys]
+        H -->|Management| K[building_contacts.csv<br/>Property Management]
+    end
+
+    subgraph "Step 3: Contact Enrichment (Optional)"
+        I --> L[Hunter.io API<br/>Email Discovery]
+        I --> M[LinkedIn Scraping<br/>Playwright + LLM]
+        I --> N[Website Scraping<br/>Contact Pages]
+        L --> O[Enriched CSV<br/>+Email +Phone +LinkedIn]
+        M --> O
+        N --> O
+        J --> L
+        K --> L
+    end
+
+    subgraph "Step 4: Export & Visualization"
+        O --> P[simplekml Library<br/>KML Generation]
+        P --> Q[Style Definitions<br/>Color-coded markers]
+        Q --> R[HTML Popups<br/>Contact details]
+        R --> S{Format Fix}
+        S -->|Folder-level styles| T[fix_kml_styles.py<br/>Move to Document level]
+        T --> U[Final KMZ File<br/>Google My Maps Compatible]
+        S -->|Direct| U
+    end
+
+    subgraph "Census Data Layer (Brooklyn & Queens)"
+        V[Census Bureau<br/>TIGER/Line Shapefiles] --> W[1,530 Census Tracts<br/>geopandas]
+        X[Census ACS API<br/>Table B19013] --> Y[Median Income Data<br/>by Tract]
+        W --> Z[Spatial Join<br/>Merge by GEOID]
+        Y --> Z
+        Z --> AA[Income Choropleth<br/>6-bin color scheme]
+        AA --> AB[KML Generation<br/>Polygon Placemark]
+        AB --> T
+    end
+
+    subgraph "Data Processing & Windows Compatibility"
+        I --> AC[combine_building_contacts.py<br/>CSV Consolidation]
+        J --> AC
+        K --> AC
+        AC --> AD[Unicode Normalization<br/>Smart quotes, dashes]
+        AD --> AE[UTF-8 BOM Encoding<br/>Excel Compatible]
+        AE --> AF[Combined Contact CSV<br/>All buildings in 1 file]
+    end
+
+    subgraph "Output Files"
+        U --> AG[district18_tenants.kmz<br/>62 buildings, 352 tenants]
+        U --> AH[district9_tenants.kmz<br/>6 buildings, 27 contacts]
+        U --> AI[brooklyn_queens_income.kmz<br/>184 KB, color-coded]
+        AF --> AJ[district18_building_management_contacts.csv<br/>153 contacts, 41 buildings]
+        AF --> AK[district9_building_management_contacts.csv<br/>27 contacts, 6 buildings]
+    end
+
+    subgraph "Supporting Infrastructure"
+        AL[Docker Container<br/>GDAL, geopandas, fiona] -.->|Geospatial Processing| W
+        AM[Progress Tracking<br/>JSON files] -.->|Resume on Failure| G
+        AN[Rate Limiting<br/>Retry Logic] -.->|API Protection| E
+        AO[Logging System<br/>logs/scraper.log] -.->|Monitoring| G
+    end
+
+    style A fill:#e1f5ff
+    style A1 fill:#e1f5ff
+    style A2 fill:#e1f5ff
+    style A3 fill:#e1f5ff
+    style C fill:#fff3e0
+    style E fill:#fff3e0
+    style G fill:#f3e5f5
+    style L fill:#fff3e0
+    style M fill:#f3e5f5
+    style P fill:#e8f5e9
+    style T fill:#ffebee
+    style V fill:#fff3e0
+    style X fill:#fff3e0
+    style AC fill:#e8f5e9
+    style AG fill:#c8e6c9
+    style AH fill:#c8e6c9
+    style AI fill:#c8e6c9
+    style AJ fill:#c8e6c9
+    style AK fill:#c8e6c9
+```
+
+**Color Legend:**
+- 🔵 **Light Blue**: Input data sources
+- 🟠 **Orange**: External APIs (Google Places, Serper.dev, Hunter.io, Census Bureau)
+- 🟣 **Purple**: AI/LLM processing (OpenAI GPT-4o-mini, LinkedIn extraction)
+- 🟢 **Light Green**: Data processing scripts
+- 🔴 **Red**: Critical compatibility fixes
+- 🟢 **Dark Green**: Final output deliverables
+
+**Key Workflows:**
+1. **Building Geocoding** → Converts addresses to GPS coordinates via Google Places API
+2. **Tenant Scraping** → Web search → Scraping → LLM parsing → 3-way classification
+3. **Contact Enrichment** → Email/phone/LinkedIn discovery via Hunter.io and web scraping
+4. **KMZ Export** → KML generation → Style fix → Google My Maps compatible files
+5. **Census Overlay** → Demographic income choropleth for Brooklyn & Queens
+6. **CSV Consolidation** → Windows-compatible combined contact exports
 
 ## Project Structure
 
@@ -32,13 +165,22 @@ sy_promotion_merchant_scraper/
 ├── main.py              # Main script
 ├── scripts/
 │   ├── building_tenants/  # Office building tenant scraping
-│   ├── pharmacies/        # Pharmacy scraping
-│   └── utils/            # Utility scripts
+│   │   ├── district18/    # District 18 (Midtown) scripts
+│   │   └── district9/     # District 9 (Madison Ave) scripts
+│   ├── census/           # Census data and income mapping
+│   ├── pharmacies/       # Pharmacy scraping
+│   └── utils/           # Utility scripts
 ├── data/
-│   ├── building_tenants/ # Building tenant data
-│   ├── pharmacies/       # Pharmacy data
-│   └── district_18/      # District 18 data
-└── docs/                 # Documentation
+│   ├── building_tenants/        # Building tenant data
+│   │   ├── tenants/district18/  # District 18 tenant CSVs
+│   │   ├── tenants/district9/   # District 9 tenant CSVs
+│   │   └── exports/            # Combined CSVs and KMZ files
+│   ├── census/                 # Census tract data
+│   │   ├── boundaries/         # TIGER/Line shapefiles
+│   │   └── exports/           # Income map KMZ files
+│   ├── pharmacies/            # Pharmacy data
+│   └── district_18/           # District 18 raw data
+└── docs/                      # Documentation
 ```
 
 ## Setup
@@ -411,6 +553,29 @@ python3 scripts/building_tenants/district9_export_to_kmz.py
 - **Buildings**: 6 premium buildings (330 Madison, 1221 6th Ave, 477/485/488 Madison, 499 Park)
 - **Features**: Building management contacts displayed first, enriched tenant data
 
+**District 18 Building Tenant Scraper**
+```bash
+# Step 1: Convert Excel to building CSV
+docker-compose run --rm scraper python scripts/building_tenants/district18/01_convert_excel_to_buildings.py
+
+# Step 2: Scrape tenant directories
+docker-compose run --rm scraper python scripts/building_tenants/district18/02_scrape_tenant_directories.py
+
+# Step 3: Enrich contacts (optional but recommended)
+docker-compose run --rm scraper python scripts/building_tenants/district18/03_enrich_contacts.py
+
+# Step 4: Generate Google Maps KMZ
+python3 scripts/building_tenants/district18/04_export_to_kmz.py
+```
+- **Input**: `data/district_18/18.xlsx` - Excel file with building addresses
+- **Output**: 
+  - `data/building_tenants/buildings/district18_buildings.csv` - Building coordinates
+  - `data/building_tenants/tenants/district18/{building}_merchants.csv` - Tenant data
+  - `data/building_tenants/exports/district18_tenants.kmz` - Google Maps file
+- **Buildings**: 91 buildings in District 18 (Midtown Manhattan)
+- **Features**: Same 4-step workflow as Lower Manhattan, adapted for District 18 data structure
+- **Results**: 62 buildings with tenant data, 352 total tenants extracted
+
 ---
 
 ### Data Processing & Utilities
@@ -459,6 +624,7 @@ HUNTER_API_KEY=your_key_here           # Hunter.io for email finding
 **Building Coordinates**:
 - `buildings/lower_manhattan_office_buildings.csv` - ~324 office buildings
 - `buildings/district9_buildings.csv` - 6 District 9 premium buildings
+- `buildings/district18_buildings.csv` - 91 District 18 buildings
 
 **Tenant Data** (per building):
 - `tenants/lower_manhattan/{building}_merchants.csv` - Merchants and businesses
@@ -467,16 +633,23 @@ HUNTER_API_KEY=your_key_here           # Hunter.io for email finding
 - `tenants/district9/{building}_merchants.csv` - District 9 merchants
 - `tenants/district9/{building}_lawyers.csv` - District 9 lawyers
 - `tenants/district9/{building}_building_contacts.csv` - District 9 building mgmt
+- `tenants/district18/{building}_merchants.csv` - District 18 merchants
+- `tenants/district18/{building}_lawyers.csv` - District 18 lawyers
+- `tenants/district18/{building}_building_contacts.csv` - District 18 building mgmt
 
 **Exports**:
 - `exports/lower_manhattan_tenants.kml` - KML for Google Maps
 - `exports/lower_manhattan_tenants.kmz` - Compressed KML (final deliverable)
 - `exports/district9_tenants.kml` - District 9 KML
 - `exports/district9_tenants.kmz` - District 9 compressed KML
+- `exports/district18_tenants.kml` - District 18 KML
+- `exports/district18_tenants.kmz` - District 18 compressed KML
 
 **Progress Files**:
-- `progress/enrichment_progress.json` - Enrichment script progress (allows resume)
+- `progress/enrichment_progress.json` - Lower Manhattan enrichment progress (allows resume)
+- `progress/district18_enrichment_progress.json` - District 18 enrichment progress (allows resume)
 - `progress/targeted_buildings_51.txt` - List of buildings for targeted enrichment
+- `scraping_coverage_report_district18.csv` - District 18 scraping coverage report
 
 ### Pharmacies: `data/pharmacies/`
 
@@ -537,6 +710,21 @@ python3 scripts/building_tenants/district9_get_coordinates.py
 python3 scripts/building_tenants/district9_export_to_kmz.py
 ```
 
+### District 18 Building Tenants Pipeline
+```bash
+# Step 1: Convert Excel to building CSV
+docker-compose run --rm scraper python scripts/building_tenants/district18/01_convert_excel_to_buildings.py
+
+# Step 2: Scrape tenant directories (all 91 buildings)
+docker-compose run --rm scraper python scripts/building_tenants/district18/02_scrape_tenant_directories.py
+
+# Step 3: Enrich contacts (optional, top 25 buildings)
+docker-compose run --rm scraper python scripts/building_tenants/district18/03_enrich_contacts.py
+
+# Step 4: Generate KMZ file
+python3 scripts/building_tenants/district18/04_export_to_kmz.py
+```
+
 ### Pharmacy Pipeline
 ```bash
 # Scrape all NYC pharmacies
@@ -561,4 +749,4 @@ python3 scripts/utils/populate_cache_from_csv.py
 ---
 
 **Last Updated:** November 27, 2024
-**Version:** 3.0 - Reorganized file structure
+**Version:** 3.1 - Added District 18 building tenant scraper

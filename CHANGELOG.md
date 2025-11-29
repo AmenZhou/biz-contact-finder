@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Census Income Map for Brooklyn & Queens**: Choropleth visualization of median household income
+  - Downloads TIGER/Line census tract shapefiles (1,530 tracts)
+  - Queries US Census ACS API for Table B19013 (Median Household Income 2022)
+  - Generates color-coded KMZ with 6 income bins (< $40k to $125k+)
+  - Script: `scripts/census/export_income_to_kmz.py`
+  - Output: `data/census/exports/brooklyn_queens_income.kmz` (184 KB)
+  - Google My Maps compatible with Document-level style placement
+  - Full Windows compatibility with UTF-8 BOM encoding
+- **Combined Building Management Contact Exports**: Consolidated CSV files for easy access
+  - District 18: 153 contacts from 41 buildings (`district18_building_management_contacts.csv`)
+  - District 9: 27 contacts from 6 buildings (`district9_building_management_contacts.csv`)
+  - Windows-compatible with UTF-8 BOM encoding and ASCII character normalization
+  - Script: `05_combine_building_contacts.py` for both districts
+- **KMZ Export Enhancements for District 18**:
+  - Building management contacts now highlighted with searchable marker text
+  - Improved HTML popup formatting with visual separators (divider lines between merchants)
+  - Company grouping for law firms and building management (multiple contacts under same company)
+  - Gray box styling for law firms and building management sections
+  - Divider lines between merchant entries for better readability
+  - Fixed spacing issues between sections
+- **District 18 Building Tenant Scraper**: Complete 4-step workflow for scraping tenant data from District 18 buildings
+  - **Step 1**: `01_convert_excel_to_buildings.py` - Converts Excel file (`data/district_18/18.xlsx`) to building CSV with geocoded coordinates
+  - **Step 2**: `02_scrape_tenant_directories.py` - Scrapes tenant directories using Serper.dev API and OpenAI LLM extraction
+  - **Step 3**: `03_enrich_contacts.py` - Enriches tenant contact data (emails, phones, LinkedIn) for top buildings
+  - **Step 4**: `04_export_to_kmz.py` - Generates Google Maps KMZ file with color-coded markers and interactive popups
+  - Processes 91 buildings in District 18 (Midtown Manhattan)
+  - Output: 62 buildings with tenant data, 352 total tenants extracted
+  - Follows same pattern as Lower Manhattan workflow for consistency
 - **Pharmacy Scraper for Area #9**: New `PharmacyScraper` class and `scrape_pharmacies_area9.py` script to find all pharmacies in Chelsea/NoMad district (Area #9) using Google Places API
   - Grid-based search with 3x3 coverage pattern for comprehensive area scanning
   - Text-based search with location bias for additional coverage
@@ -24,11 +52,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Data source attribution for tracking where information came from
 
 ### Changed
+- **Docker Environment**: Added geospatial dependencies for census data processing
+  - Installed GDAL, libgdal-dev, libspatialindex-dev in Docker container
+  - Added Python packages: geopandas>=0.14.0, simplekml>=1.3.6, fiona>=1.9.0, shapely>=2.0.0
+  - Updated Dockerfile to include GDAL system dependencies
+- **KMZ Export Format**: Enhanced District 18 KMZ with improved visual organization
+  - Added text-based divider lines (──────) between merchants for clarity
+  - Implemented company grouping with gray boxes for building management and law firms
+  - Improved spacing and margins throughout popup HTML
 - **Input File**: Updated default input file to `data/477 Madison Ave.xlsx`
 - **Output Columns**: Added `company_size` and `company_type_hunter` columns to merchant output CSV
 - **Configuration**: Added Area #9 geographic boundaries and pharmacy CSV path to `config/settings.py`
 
 ### Fixed
+- **Google My Maps KML Compatibility**: Fixed polygon colors not displaying in Google My Maps
+  - Root cause: Google My Maps doesn't support styles at `<Folder>` level, only at `<Document>` level
+  - Created `fix_kml_styles.py` post-processing script to move all Style elements to Document level
+  - KMZ files now display vibrant color-coded income levels correctly
+- **Building Management Contact Field Mapping**: Fixed "Unknown" values in KMZ popups
+  - Updated to use correct CSV field names: `contact_name` instead of `contact_person`
+  - Added fallback handling for `building_name` vs `name` field inconsistencies
+- **KMZ Visual Formatting Issues**: Fixed merchant entries running together in Google Maps popups
+  - Changed from background-based separation (not rendered by Google Maps) to text-based dividers
+  - Adjusted spacing between sections (merchants, law firms, building management)
+  - Removed non-functional "[Building Management Contact Available]" yellow banner
 - **Resource Leak in HunterScraper**: Fixed memory leak where Playwright browser instances were not properly closed
   - Added `cleanup()` method to `ContactInfoScraper` class
   - Browser resources are now properly released after scraping completes

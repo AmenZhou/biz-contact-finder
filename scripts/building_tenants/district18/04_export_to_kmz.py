@@ -81,7 +81,7 @@ def load_tenant_data(building_address: str) -> Dict:
     return result
 
 
-def create_html_popup(building: Dict, tenants: Dict) -> str:
+def create_html_popup(building: Dict, tenants: Dict, has_building_contacts: int = 0) -> str:
     """Generate HTML popup content for a building"""
     address = building['address']
     levels = building['levels']
@@ -114,7 +114,7 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
   </h4>
   <div style="margin-left: 10px;">
 '''
-        for merchant in tenants['merchants'][:20]:  # Limit to 20 to avoid popup overflow
+        for i, merchant in enumerate(tenants['merchants'][:20]):  # Limit to 20 to avoid popup overflow
             name = merchant.get('name', 'Unknown')
             website = merchant.get('website', '')
             email = merchant.get('email', '')
@@ -122,10 +122,9 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
             contact_person = merchant.get('contact_person', '')
             contact_title = merchant.get('contact_title', '')
 
-            html += f'''
-    <div style="margin-bottom: 12px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
-      <p style="margin: 2px 0; font-weight: bold;">{name}</p>
-'''
+            # Merchant info
+            html += f'      <p style="margin: 8px 0 2px 0; font-weight: bold; font-size: 13px;">{name}</p>\n'
+
             if website:
                 html += f'      <p style="margin: 2px 0; font-size: 12px;">🌐 <a href="{website}" target="_blank">Website</a></p>\n'
             if email:
@@ -134,9 +133,11 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
                 html += f'      <p style="margin: 2px 0; font-size: 12px;">📞 {phone}</p>\n'
             if contact_person:
                 title_str = f" - {contact_title}" if contact_title else ""
-                html += f'      <p style="margin: 2px 0; font-size: 11px; color: #666;">👤 {contact_person}{title_str}</p>\n'
+                html += f'      <p style="margin: 2px 0 8px 0; font-size: 11px; color: #666;">👤 {contact_person}{title_str}</p>\n'
 
-            html += '    </div>\n'
+            # Add divider line after each merchant (including the last one if building management follows)
+            if i < min(len(tenants['merchants']), 20) - 1:
+                html += '      <p style="margin: 10px 0; color: #999;">──────────────────────</p>\n'
 
         if total_merchants > 20:
             html += f'    <p style="color: #666; font-style: italic; font-size: 12px;">...and {total_merchants - 20} more tenants</p>\n'
@@ -160,9 +161,9 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
             lawyers_by_company[company].append(lawyer)
 
         for company, lawyers in list(lawyers_by_company.items())[:10]:  # Limit to 10 firms
-            html += f'    <div style="margin-bottom: 10px;">\n'
-            html += f'      <p style="margin: 2px 0; font-weight: bold;">{company}</p>\n'
-            html += '      <ul style="margin: 5px 0; padding-left: 20px; font-size: 12px;">\n'
+            # Add gray box for each law firm
+            html += f'    <div style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px;">\n'
+            html += f'      <p style="margin: 0 0 8px 0; font-weight: bold; font-size: 13px;">{company}</p>\n'
 
             for lawyer in lawyers[:5]:  # Max 5 lawyers per firm
                 lawyer_name = lawyer.get('lawyer_name', '')
@@ -172,19 +173,17 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
 
                 if lawyer_name:
                     title_str = f" - {lawyer_title}" if lawyer_title else ""
-                    html += f'        <li>{lawyer_name}{title_str}'
-                    if lawyer_email or lawyer_phone:
-                        html += '<br/>'
-                        if lawyer_email:
-                            html += f'📧 {lawyer_email} '
-                        if lawyer_phone:
-                            html += f'📞 {lawyer_phone}'
-                    html += '</li>\n'
+                    html += f'      <div style="margin-left: 15px; margin-bottom: 6px;">\n'
+                    html += f'        <p style="margin: 2px 0; font-size: 12px;">• {lawyer_name}{title_str}</p>\n'
+                    if lawyer_email:
+                        html += f'        <p style="margin: 2px 0 2px 18px; font-size: 11px;">📧 {lawyer_email}</p>\n'
+                    if lawyer_phone:
+                        html += f'        <p style="margin: 2px 0 2px 18px; font-size: 11px;">📞 {lawyer_phone}</p>\n'
+                    html += '      </div>\n'
 
             if len(lawyers) > 5:
-                html += f'        <li style="color: #666; font-style: italic;">...and {len(lawyers) - 5} more attorneys</li>\n'
+                html += f'      <p style="margin-left: 15px; color: #666; font-style: italic; font-size: 11px;">...and {len(lawyers) - 5} more attorneys</p>\n'
 
-            html += '      </ul>\n'
             html += '    </div>\n'
 
         if len(lawyers_by_company) > 10:
@@ -194,34 +193,57 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
 
     # Building Management Section
     if total_contacts > 0:
+        # Add divider before Building Management if there were merchants or lawyers before it
+        if total_merchants > 0 or total_lawyers > 0:
+            html += '  <p style="margin: 15px 0 5px 0; color: #999;">──────────────────────</p>\n'
+            html += '  <br/>\n'
+
         html += f'''
-  <h4 style="color: #333; border-bottom: 2px solid #f9a825; padding-bottom: 5px; margin-top: 15px; font-size: 14px;">
+  <h4 style="color: #333; border-bottom: 2px solid #f9a825; padding-bottom: 5px; margin-top: 10px; font-size: 14px;">
     🏗️ Building Management
   </h4>
   <div style="margin-left: 10px;">
 '''
-        for contact in tenants['building_contacts'][:3]:  # Max 3 contacts
-            company = contact.get('name', 'Unknown')
-            contact_person = contact.get('contact_person', '')
-            contact_title = contact.get('contact_title', '')
-            email = contact.get('email', '')
-            phone = contact.get('phone', '')
-            website = contact.get('website', '')
+        # Group contacts by company name
+        contacts_by_company = {}
+        for contact in tenants['building_contacts']:
+            company = contact.get('building_name', contact.get('name', 'Unknown'))
+            if company not in contacts_by_company:
+                contacts_by_company[company] = []
+            contacts_by_company[company].append(contact)
 
-            html += f'    <div style="margin-bottom: 10px;">\n'
-            html += f'      <p style="margin: 2px 0; font-weight: bold;">{company}</p>\n'
+        # Display grouped contacts (max 3 companies, max 5 contacts per company)
+        for company, contacts in list(contacts_by_company.items())[:3]:
+            # Add gray box for each company
+            html += f'    <div style="margin-bottom: 8px; margin-top: 5px; padding: 10px; background: #f8f9fa; border-radius: 4px;">\n'
+            html += f'      <p style="margin: 0 0 4px 0; font-weight: bold; font-size: 13px;">{company}</p>\n'
 
-            if contact_person:
-                title_str = f" - {contact_title}" if contact_title else ""
-                html += f'      <p style="margin: 2px 0; font-size: 12px;">👤 {contact_person}{title_str}</p>\n'
-            if email:
-                html += f'      <p style="margin: 2px 0; font-size: 12px;">📧 {email}</p>\n'
-            if phone:
-                html += f'      <p style="margin: 2px 0; font-size: 12px;">📞 {phone}</p>\n'
-            if website:
-                html += f'      <p style="margin: 2px 0; font-size: 12px;">🌐 <a href="{website}" target="_blank">Website</a></p>\n'
+            for contact in contacts[:5]:  # Max 5 contacts per company
+                contact_person = contact.get('contact_name', contact.get('contact_person', ''))
+                contact_title = contact.get('contact_title', '')
+                email = contact.get('email', '')
+                phone = contact.get('phone', '')
+                website = contact.get('website', '')
+
+                if contact_person:
+                    title_str = f" - {contact_title}" if contact_title else ""
+                    html += f'      <div style="margin-left: 15px; margin-bottom: 6px;">\n'
+                    html += f'        <p style="margin: 2px 0; font-size: 12px;">• {contact_person}{title_str}</p>\n'
+                    if email:
+                        html += f'        <p style="margin: 2px 0 2px 18px; font-size: 11px;">📧 {email}</p>\n'
+                    if phone:
+                        html += f'        <p style="margin: 2px 0 2px 18px; font-size: 11px;">📞 {phone}</p>\n'
+                    if website:
+                        html += f'        <p style="margin: 2px 0 2px 18px; font-size: 11px;">🌐 <a href="{website}" target="_blank">Website</a></p>\n'
+                    html += '      </div>\n'
+
+            if len(contacts) > 5:
+                html += f'      <p style="margin-left: 15px; color: #666; font-style: italic; font-size: 11px;">...and {len(contacts) - 5} more contacts</p>\n'
 
             html += '    </div>\n'
+
+        if len(contacts_by_company) > 3:
+            html += f'    <p style="color: #666; font-style: italic; font-size: 12px;">...and {len(contacts_by_company) - 3} more management companies</p>\n'
 
         html += '  </div>\n'
 
@@ -237,8 +259,7 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
     html += f'''
   <hr style="border: 1px solid #ddd; margin-top: 15px;"/>
   <p style="font-size: 11px; color: #999; text-align: center; margin: 5px 0;">
-    Data scraped: {datetime.now().strftime('%Y-%m-%d')}<br/>
-    District 18 Building Tenants
+    Data scraped: {datetime.now().strftime('%Y-%m-%d')}
   </p>
 </div>'''
 
@@ -283,6 +304,7 @@ def create_building_placemark(doc: Element, building: Dict, tenants: Dict) -> No
 
     # Count tenants
     tenant_count = len(tenants['merchants']) + len(tenants['lawyers'])
+    contact_count = len(tenants['building_contacts'])
 
     # Create placemark
     placemark = SubElement(doc, "Placemark")
@@ -293,7 +315,7 @@ def create_building_placemark(doc: Element, building: Dict, tenants: Dict) -> No
 
     # Description (HTML popup)
     description = SubElement(placemark, "description")
-    html_content = create_html_popup(building, tenants)
+    html_content = create_html_popup(building, tenants, contact_count)
     description.text = f"<![CDATA[{html_content}]]>"
 
     # Style
@@ -355,13 +377,14 @@ Total buildings: {len(buildings)}"""
         # Load tenant data
         tenants = load_tenant_data(building['address'])
         tenant_count = len(tenants['merchants']) + len(tenants['lawyers'])
+        contact_count = len(tenants['building_contacts'])
 
-        # Skip buildings with no tenants (only show buildings with actual merchants/lawyers)
-        if tenant_count == 0:
+        # Skip buildings with no data at all (no tenants AND no building contacts)
+        if tenant_count == 0 and contact_count == 0:
             buildings_without_data += 1
             continue
 
-        # Only create placemark for buildings with tenant data
+        # Create placemark for buildings with tenant data OR building management contacts
         buildings_with_data += 1
         total_tenants += tenant_count
         create_building_placemark(document, building, tenants)

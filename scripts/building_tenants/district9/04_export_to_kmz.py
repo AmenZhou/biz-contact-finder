@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Step 4: Export District 18 Office Building Tenants to KMZ
+Step 4: Export District 9 Office Building Tenants to KMZ
 Creates interactive Google Maps KMZ file with clickable building markers
 """
 
@@ -16,10 +16,10 @@ from datetime import datetime
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "building_tenants"
-BUILDINGS_CSV = DATA_DIR / "buildings" / "district18_buildings.csv"
-TENANTS_DIR = DATA_DIR / "tenants" / "district18"
-OUTPUT_KML = DATA_DIR / "exports" / "district18_tenants.kml"
-OUTPUT_KMZ = DATA_DIR / "exports" / "district18_tenants.kmz"
+BUILDINGS_CSV = DATA_DIR / "buildings" / "district9_buildings.csv"
+TENANTS_DIR = DATA_DIR / "tenants" / "district9"
+OUTPUT_KML = DATA_DIR / "exports" / "district9_tenants.kml"
+OUTPUT_KMZ = DATA_DIR / "exports" / "district9_tenants.kmz"
 
 
 def load_building_data() -> List[Dict]:
@@ -439,5 +439,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 

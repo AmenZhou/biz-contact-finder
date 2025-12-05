@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional
 import json
+import xml.etree.ElementTree as ET
 
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -18,7 +19,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 import geopandas as gpd
 import pandas as pd
 import simplekml
-from simplekml import Kml
+from simplekml import Kml, Style, PolyStyle, LineStyle
 
 
 # Paths
@@ -36,16 +37,20 @@ BROOKLYN_FIPS = "047"
 QUEENS_FIPS = "081"
 NY_STATE_FIPS = "36"
 
-# Color bins for median household income (vibrant, fully opaque colors)
+# Color bins for median household income (matching legend color scheme)
 # KML colors are in 'aabbggrr' format (alpha, blue, green, red)
-# Using deep red → orange → yellow → green gradient for intuitive income visualization
+# 9-bin system with 30% opacity for most brackets, higher opacity for highest bracket
+# Legend mapping: 1=10k, 5=50k, 10=100k
 INCOME_BINS = [
-    {"max": 40000, "color": "ff0000CC", "label": "< $40,000 (Low)"},          # Deep Red
-    {"max": 60000, "color": "ff0066FF", "label": "$40,000 - $60,000"},        # Bright Orange
-    {"max": 80000, "color": "ff00FFFF", "label": "$60,000 - $80,000"},        # Bright Yellow
-    {"max": 100000, "color": "ff66FF66", "label": "$80,000 - $100,000"},      # Light Green
-    {"max": 125000, "color": "ff00DD00", "label": "$100,000 - $125,000"},     # Bright Green
-    {"max": float('inf'), "color": "ff008800", "label": "$125,000+ (High)"}   # Dark Green
+    {"max": 50000, "color": "4d000000", "label": "< $50,000"},                # Black - 30% opacity
+    {"max": 60000, "color": "4d0000FF", "label": "$50,000 - $60,000"},       # Red - 30% opacity
+    {"max": 70000, "color": "4d00A5FF", "label": "$60,000 - $70,000"},       # Orange - 30% opacity
+    {"max": 80000, "color": "4d00FFFF", "label": "$70,000 - $80,000"},       # Yellow - 30% opacity
+    {"max": 90000, "color": "4d00FF00", "label": "$80,000 - $90,000"},       # Green - 30% opacity
+    {"max": 100000, "color": "4dFFFF00", "label": "$90,000 - $100,000"},     # Light Blue - 30% opacity
+    {"max": 150000, "color": "4dFF0000", "label": "$100,000 - $150,000"},    # Dark Blue - 30% opacity
+    {"max": 200000, "color": "4dFF00FF", "label": "$150,000 - $200,000"},    # Purple - 30% opacity
+    {"max": float('inf'), "color": "91FF00CC", "label": "$200,000+"}         # Dark Purple - 57% opacity (VISIBLE!)
 ]
 
 
@@ -159,7 +164,7 @@ def merge_geo_and_income(shapefile_path: Path, income_df: pd.DataFrame) -> gpd.G
 def get_color_for_income(income: Optional[float]) -> str:
     """Get color code based on income bin"""
     if pd.isna(income):
-        return "80808080"  # Gray with transparency for missing data
+        return "4d000000"  # Semi-transparent black/gray for missing data (30% opacity, matches reference)
 
     for bin_config in INCOME_BINS:
         if income < bin_config['max']:
@@ -172,11 +177,11 @@ def create_kmz(gdf: gpd.GeoDataFrame) -> None:
     """Generate KML/KMZ file with color-coded census tracts"""
     print("\n4. Creating KML/KMZ file...")
 
-    # Create KML object with inline styles for Google My Maps compatibility
+    # Create KML object with shared styles at Document level for Google My Maps compatibility
     kml = Kml()
     kml.document.name = "Brooklyn & Queens Median Household Income"
-    # Disable shared styles - each polygon gets its own inline style
-    kml.document.sharestyle = False
+    # Enable shared styles - styles must be at Document level for Google My Maps
+    kml.document.sharestyle = True
     kml.document.description = f"""
 Census Tract Level Median Household Income
 Data Source: US Census Bureau American Community Survey (ACS) 2022 5-Year Estimates
@@ -194,6 +199,37 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
 
     # Add legend as a screen overlay description
     legend_text = "\\n".join([f"{bin['label']}" for bin in INCOME_BINS])
+
+    # Create shared styles at Document level (before creating Folders)
+    # Google My Maps only resolves styleUrl references when styles are at Document level
+    print("   Creating shared styles at Document level...")
+    color_to_style_id: Dict[str, str] = {}
+    
+    # Create a style for each unique color in INCOME_BINS
+    for bin_config in INCOME_BINS:
+        color = bin_config['color']
+        if color not in color_to_style_id:
+            # Create a unique style ID based on color
+            style_id = f"poly-{color}"
+            style = Style()
+            style._id = style_id
+            style.polystyle = PolyStyle(color=color, fill=1, outline=1)
+            style.linestyle = LineStyle(color="ff000000", width=0.5)  # Black outline
+            kml.document.styles.append(style)
+            color_to_style_id[color] = style_id
+    
+    # Create style for missing data
+    missing_data_color = "4d000000"
+    if missing_data_color not in color_to_style_id:
+        style_id = f"poly-{missing_data_color}"
+        style = Style()
+        style._id = style_id
+        style.polystyle = PolyStyle(color=missing_data_color, fill=1, outline=1)
+        style.linestyle = LineStyle(color="ff000000", width=0.5)  # Black outline
+        kml.document.styles.append(style)
+        color_to_style_id[missing_data_color] = style_id
+    
+    print(f"   ✓ Created {len(color_to_style_id)} shared styles at Document level")
 
     # Create folders for Brooklyn and Queens
     brooklyn_folder = kml.newfolder(name=f"Brooklyn ({len(gdf[gdf['borough'] == 'Brooklyn'])} tracts)")
@@ -240,14 +276,11 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
         # Set polygon coordinates (lon, lat)
         pol.outerboundaryis = coords
 
-        # CRITICAL: Use inline styles for Google My Maps compatibility
-        # Google My Maps does NOT support styles at Folder level
+        # CRITICAL: Use styleUrl references to Document-level styles for Google My Maps compatibility
+        # Google My Maps only resolves styleUrl references when styles are at Document level
         color = get_color_for_income(income)
-        pol.style.polystyle.color = color  # Already in aabbggrr hex format
-        pol.style.polystyle.fill = 1
-        pol.style.polystyle.outline = 1
-        pol.style.linestyle.color = "ff000000"  # Black outline
-        pol.style.linestyle.width = 0.5
+        style_id = color_to_style_id[color]
+        pol.styleurl = f"#{style_id}"
 
         # Add popup description
         if pd.notna(income):
@@ -284,6 +317,51 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
 
     kml.save(str(OUTPUT_KML))
     print(f"   ✓ KML saved: {OUTPUT_KML}")
+
+    # Post-process KML to add styleUrl to Placemark elements based on polygon color
+    # This is needed because simplekml doesn't easily support setting styleurl on Placemarks
+    print("   Post-processing KML to add styleUrl to Placemarks...")
+    tree = ET.parse(OUTPUT_KML)
+    root = tree.getroot()
+    
+    # Register KML namespace
+    ET.register_namespace('', 'http://www.opengis.net/kml/2.2')
+    kml_ns = '{http://www.opengis.net/kml/2.2}'
+    
+    # Process each polygon and add styleUrl to its parent Placemark
+    for idx, row in gdf.iterrows():
+        income = row['median_income']
+        color = get_color_for_income(income)
+        style_id = color_to_style_id[color]
+        
+        # Find the Placemark by matching GEOID in the description (more unique than tract number)
+        geoid = row['GEOID']
+        borough = row['borough']
+        tract_ce = row['TRACTCE']
+        
+        for placemark in root.iter(f'{kml_ns}Placemark'):
+            # Check description for GEOID to uniquely identify the placemark
+            desc_elem = placemark.find(f'{kml_ns}description')
+            if desc_elem is not None and geoid in desc_elem.text:
+                # Also verify borough matches to be extra sure
+                if borough in desc_elem.text:
+                    # Check if Placemark doesn't already have a styleUrl
+                    if placemark.find(f'{kml_ns}styleUrl') is None:
+                        # Create styleUrl element for Placemark
+                        styleurl_new = ET.Element(f'{kml_ns}styleUrl')
+                        styleurl_new.text = f"#{style_id}"
+                        # Insert styleUrl after description but before Polygon
+                        insert_pos = 0
+                        for i, child in enumerate(placemark):
+                            if child.tag.endswith('description'):
+                                insert_pos = i + 1
+                                break
+                        placemark.insert(insert_pos, styleurl_new)
+                    break
+    
+    # Save the fixed KML with proper namespace handling
+    tree.write(OUTPUT_KML, encoding='utf-8', xml_declaration=True)
+    print(f"   ✓ KML post-processed: {OUTPUT_KML}")
 
     # Create KMZ (zipped KML)
     with zipfile.ZipFile(OUTPUT_KMZ, 'w', zipfile.ZIP_DEFLATED) as kmz:

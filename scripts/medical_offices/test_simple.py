@@ -5,7 +5,7 @@ import os
 import requests
 import json
 
-SERPER_API_KEY = "f6a7303332e8e327cf2b078939bb3263490d5ec0"
+SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
 def test_serper_search():
     """Test a single Serper search"""

@@ -8,6 +8,7 @@ import sys
 import time
 import requests
 import re
+import logging
 from pathlib import Path
 from typing import Optional, List
 from bs4 import BeautifulSoup
@@ -17,6 +18,12 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 import pandas as pd
 from openai import OpenAI
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -58,24 +65,45 @@ SPECIALTY_KEYWORDS = {
     "Allergy": ["allergy", "allergist"],
 }
 
+# Specialty normalization map
+SPECIALTY_NORMALIZATION = {
+    "general practice": "Primary Care",
+    "family practice": "Primary Care",
+    "family medicine": "Primary Care",
+    "family doctor": "Primary Care",
+    "general medicine": "Primary Care",
+    "internist": "Internal Medicine",
+}
 
-def fetch_website_content(url: str, timeout: int = 30) -> Optional[str]:
-    """Fetch website HTML content"""
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
 
-        response = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-        response.raise_for_status()
-        return response.text
+def fetch_website_content(url: str, timeout: int = 10, max_retries: int = 2) -> Optional[str]:
+    """Fetch website HTML content with retry logic"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
 
-    except Exception as e:
-        return None
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+            response.raise_for_status()
+            return response.text
+
+        except requests.Timeout:
+            logging.warning(f"Timeout fetching {url} (attempt {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                time.sleep(1)
+        except requests.RequestException as e:
+            logging.warning(f"Error fetching {url}: {str(e)[:100]}")
+            break
+        except Exception as e:
+            logging.error(f"Unexpected error fetching {url}: {str(e)[:100]}")
+            break
+
+    return None
 
 
 def extract_text_from_html(html: str) -> str:
-    """Extract clean text from HTML"""
+    """Extract clean text from HTML, prioritizing specialty-related content"""
     try:
         soup = BeautifulSoup(html, 'html.parser')
 
@@ -95,6 +123,7 @@ def extract_text_from_html(html: str) -> str:
         return text[:3000]
 
     except Exception as e:
+        logging.error(f"Error extracting text from HTML: {str(e)[:100]}")
         return ""
 
 
@@ -112,6 +141,25 @@ def extract_specialties_from_name(name: str) -> List[str]:
     return list(set(specialties))  # Remove duplicates
 
 
+def normalize_specialties(specialties: List[str]) -> List[str]:
+    """Normalize and deduplicate specialty names"""
+    normalized = []
+    seen = set()
+
+    for spec in specialties:
+        spec_lower = spec.lower().strip()
+
+        # Check if it needs normalization
+        normalized_spec = SPECIALTY_NORMALIZATION.get(spec_lower, spec.strip())
+
+        # Avoid duplicates
+        if normalized_spec not in seen:
+            normalized.append(normalized_spec)
+            seen.add(normalized_spec)
+
+    return normalized
+
+
 def extract_specialties_with_llm(website_text: str, office_name: str) -> List[str]:
     """Use OpenAI to extract medical specialties from website text"""
 
@@ -122,7 +170,7 @@ Office Name: {office_name}
 Website Content:
 {website_text}
 
-Extract and return ONLY a JSON array of medical specialties offered at this office.
+Extract and return medical specialties offered at this office.
 
 Common specialties include:
 - Primary Care / Family Medicine / General Practice
@@ -140,37 +188,34 @@ Common specialties include:
 - Neurology
 - And other medical specialties
 
-Return ONLY a JSON array like: ["Primary Care", "Internal Medicine"]
-If no specific specialties are found, return: ["General Practice"]
+Return your response as a JSON object with a "specialties" array.
+Example: {{"specialties": ["Primary Care", "Internal Medicine"]}}
+If no specific specialties are found, return: {{"specialties": ["General Practice"]}}
 """
 
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a medical specialty extraction assistant. Return only valid JSON array."},
+                {"role": "system", "content": "You are a medical specialty extraction assistant. Return only valid JSON."},
                 {"role": "user", "content": prompt}
             ],
+            response_format={"type": "json_object"},
             temperature=0,
             max_tokens=150
         )
 
         result = response.choices[0].message.content.strip()
 
-        # Try to parse JSON
-        if result.startswith("```"):
-            result = result.split("```")[1]
-            if result.startswith("json"):
-                result = result[4:]
-
         import json
-        specialties = json.loads(result)
+        data = json.loads(result)
 
-        if isinstance(specialties, list):
-            return specialties
+        if isinstance(data.get('specialties'), list):
+            return data['specialties']
         return []
 
     except Exception as e:
+        logging.error(f"Error extracting specialties with LLM: {str(e)[:100]}")
         return []
 
 
@@ -185,6 +230,7 @@ def enrich_with_specialties(row: pd.Series, index: int, total: int) -> pd.Series
         return row
 
     specialties = []
+    made_api_call = False
 
     # 1. Extract from name
     name_specialties = extract_specialties_from_name(row['name'])
@@ -201,12 +247,13 @@ def enrich_with_specialties(row: pd.Series, index: int, total: int) -> pd.Series
             if text:
                 print(f"    🤖 Extracting specialties with LLM...")
                 llm_specialties = extract_specialties_with_llm(text, row['name'])
+                made_api_call = True
                 if llm_specialties:
                     specialties.extend(llm_specialties)
                     print(f"    ✅ From website: {', '.join(llm_specialties)}")
 
-    # Remove duplicates and clean up
-    specialties = list(set(specialties))
+    # Normalize and remove duplicates
+    specialties = normalize_specialties(specialties)
 
     # If no specialties found, use search query as hint
     if not specialties:
@@ -229,6 +276,10 @@ def enrich_with_specialties(row: pd.Series, index: int, total: int) -> pd.Series
         print("    ❌ No specialties found")
     else:
         print(f"    ✅ Final: {row['specialties']}")
+
+    # Rate limiting - only sleep if we made an API call
+    if made_api_call:
+        time.sleep(0.5)
 
     return row
 
@@ -280,9 +331,6 @@ def main():
         # Track success
         if enriched_row.get('specialties') and pd.notna(enriched_row['specialties']):
             success_count += 1
-
-        # Rate limiting
-        time.sleep(0.5)
 
         # Save progress every 50 records
         if (idx + 1) % 50 == 0:

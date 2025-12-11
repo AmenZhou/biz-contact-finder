@@ -86,7 +86,6 @@ Total Offices: {len(df)}
 With Phone: {df['phone'].astype(bool).sum()}
 With Address: {df['address'].astype(bool).sum()}
 With Rating: {df['rating'].astype(bool).sum()}
-With Business Hours: {df['business_hours'].astype(bool).sum()}
 
 Data collected: {pd.Timestamp.now().strftime('%Y-%m-%d')}
 """
@@ -103,14 +102,14 @@ Data collected: {pd.Timestamp.now().strftime('%Y-%m-%d')}
     for idx, row in df.iterrows():
         print(f"[{idx + 1}/{total}] Processing: {row['name'][:60]}")
 
-        # Determine borough folder
+        # Determine borough folder - check Brooklyn first since it's more specific
         location = str(row.get('location', '')).lower()
         address = str(row.get('address', '')).lower()
 
-        if 'queens' in location or 'queens' in address:
-            folder = queens_folder
-        elif 'brooklyn' in location or 'brooklyn' in address:
+        if 'brooklyn' in location or 'brooklyn' in address:
             folder = brooklyn_folder
+        elif 'queens' in location or 'queens' in address:
+            folder = queens_folder
         else:
             # Default to Queens
             folder = queens_folder
@@ -162,12 +161,6 @@ Data collected: {pd.Timestamp.now().strftime('%Y-%m-%d')}
         if row.get('rating') and pd.notna(row['rating']) and row['rating'] != '':
             reviews = row.get('reviews', 0)
             description_parts.append(f"<b>Rating:</b> {row['rating']} ⭐ ({reviews} reviews)<br/>")
-
-        if row.get('business_hours') and pd.notna(row['business_hours']) and row['business_hours'] != '':
-            description_parts.append(f"<b>Hours:</b> {row['business_hours']}<br/>")
-
-        if row.get('practice_areas') and pd.notna(row['practice_areas']) and row['practice_areas'] != '':
-            description_parts.append(f"<b>Practice Areas:</b> {row['practice_areas']}<br/>")
 
         description_parts.append(f"<br/><i>Source: {row.get('source', 'unknown')}</i>")
 

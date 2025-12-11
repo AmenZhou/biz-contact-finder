@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-Export Queens & Brooklyn Law Office's Offices to KMZ for Google Maps
+Export Queens & Brooklyn Law Offices to KMZ for Google Maps (Final with ratings)
 """
 
 import os
 import sys
 import zipfile
 from pathlib import Path
-from typing import Dict, List
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -19,7 +18,7 @@ from simplekml import Kml
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "law_offices"
-INPUT_CSV = DATA_DIR / "queens_brooklyn_law_offices.csv"
+INPUT_CSV = DATA_DIR / "queens_brooklyn_law_offices_final.csv"
 OUTPUT_KML = DATA_DIR / "queens_brooklyn_law_offices.kml"
 OUTPUT_KMZ = DATA_DIR / "queens_brooklyn_law_offices.kmz"
 
@@ -39,7 +38,7 @@ def get_coordinates_from_serper(name: str, address: str) -> tuple:
     # Build search query
     query = f"{name} {address}"
 
-    url = "https://google.serper.dev/search"
+    url = "https://google.serper.dev/maps"
     payload = {
         "q": query,
         "location": "New York, NY",
@@ -55,19 +54,13 @@ def get_coordinates_from_serper(name: str, address: str) -> tuple:
         response.raise_for_status()
         data = response.json()
 
-        # Check for places/local pack results
+        # Check for places results
         if "places" in data and len(data["places"]) > 0:
             place = data["places"][0]
             lat = place.get("latitude")
             lon = place.get("longitude")
             if lat and lon:
                 return float(lat), float(lon)
-
-        # Check knowledge graph
-        if "knowledgeGraph" in data:
-            kg = data["knowledgeGraph"]
-            if "latitude" in kg and "longitude" in kg:
-                return float(kg["latitude"]), float(kg["longitude"])
 
         time.sleep(0.5)  # Rate limiting
 
@@ -91,8 +84,9 @@ Law Offices in Queens and Brooklyn
 
 Total Offices: {len(df)}
 With Phone: {df['phone'].astype(bool).sum()}
-With Email: {df['email'].astype(bool).sum()}
 With Address: {df['address'].astype(bool).sum()}
+With Rating: {df['rating'].astype(bool).sum()}
+With Business Hours: {df['business_hours'].astype(bool).sum()}
 
 Data collected: {pd.Timestamp.now().strftime('%Y-%m-%d')}
 """
@@ -107,23 +101,19 @@ Data collected: {pd.Timestamp.now().strftime('%Y-%m-%d')}
     missing_coords = 0
 
     for idx, row in df.iterrows():
-        print(f"[{idx + 1}/{total}] Processing: {row['name']}")
+        print(f"[{idx + 1}/{total}] Processing: {row['name'][:60]}")
 
         # Determine borough folder
         location = str(row.get('location', '')).lower()
-        if 'queens' in location:
+        address = str(row.get('address', '')).lower()
+
+        if 'queens' in location or 'queens' in address:
             folder = queens_folder
-        elif 'brooklyn' in location:
+        elif 'brooklyn' in location or 'brooklyn' in address:
             folder = brooklyn_folder
         else:
-            # Try to determine from address
-            address = str(row.get('address', '')).lower()
-            if 'queens' in address:
-                folder = queens_folder
-            elif 'brooklyn' in address:
-                folder = brooklyn_folder
-            else:
-                folder = queens_folder  # Default
+            # Default to Queens
+            folder = queens_folder
 
         # Get coordinates
         lat = row.get('latitude')
@@ -169,18 +159,44 @@ Data collected: {pd.Timestamp.now().strftime('%Y-%m-%d')}
         if row.get('website'):
             description_parts.append(f"<b>Website:</b> <a href='{row['website']}'>{row['website']}</a><br/>")
 
-        if row.get('contact_name'):
-            description_parts.append(f"<b>Contact:</b> {row['contact_name']}<br/>")
+        if row.get('rating') and pd.notna(row['rating']) and row['rating'] != '':
+            reviews = row.get('reviews', 0)
+            description_parts.append(f"<b>Rating:</b> {row['rating']} ⭐ ({reviews} reviews)<br/>")
 
-        if row.get('rating'):
-            description_parts.append(f"<b>Rating:</b> {row['rating']} ({row.get('reviews', 0)} reviews)<br/>")
+        if row.get('business_hours') and pd.notna(row['business_hours']) and row['business_hours'] != '':
+            description_parts.append(f"<b>Hours:</b> {row['business_hours']}<br/>")
+
+        if row.get('practice_areas') and pd.notna(row['practice_areas']) and row['practice_areas'] != '':
+            description_parts.append(f"<b>Practice Areas:</b> {row['practice_areas']}<br/>")
 
         description_parts.append(f"<br/><i>Source: {row.get('source', 'unknown')}</i>")
 
         pnt.description = "\n".join(description_parts)
 
-        # Style the marker
-        pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/paddle/red-circle.png'
+        # Style the marker - different colors based on rating
+        rating = row.get('rating')
+        if pd.notna(rating) and rating != '':
+            try:
+                rating_val = float(rating)
+                if rating_val >= 4.5:
+                    # Green for excellent ratings
+                    pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/paddle/grn-circle.png'
+                elif rating_val >= 4.0:
+                    # Yellow for good ratings
+                    pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/paddle/ylw-circle.png'
+                elif rating_val >= 3.0:
+                    # Orange for average ratings
+                    pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/paddle/orange-circle.png'
+                else:
+                    # Red for low ratings
+                    pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/paddle/red-circle.png'
+            except:
+                # Default blue for no rating
+                pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/paddle/blu-circle.png'
+        else:
+            # Default blue for no rating
+            pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/paddle/blu-circle.png'
+
         pnt.style.iconstyle.scale = 1.2
 
     print()
@@ -215,7 +231,6 @@ def main():
     # Check if CSV exists
     if not INPUT_CSV.exists():
         print(f"❌ Error: CSV file not found at {INPUT_CSV}")
-        print("   Please run 01_scrape_law_offices_queens_brooklyn.py first")
         sys.exit(1)
 
     # Load CSV
@@ -238,6 +253,13 @@ def main():
     print("   → Click 'Create a New Map'")
     print("   → Click 'Import'")
     print("   → Upload the .kmz file")
+    print()
+    print("📊 Color Legend:")
+    print("   🟢 Green - Excellent (4.5+ stars)")
+    print("   🟡 Yellow - Good (4.0-4.4 stars)")
+    print("   🟠 Orange - Average (3.0-3.9 stars)")
+    print("   🔴 Red - Low (< 3.0 stars)")
+    print("   🔵 Blue - No rating available")
     print("=" * 80)
 
 

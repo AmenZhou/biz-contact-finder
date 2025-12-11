@@ -71,6 +71,18 @@ SEARCH_TERMS = [
     "real estate lawyer"
 ]
 
+# Patterns to identify aggregator/directory listings (not actual law offices)
+AGGREGATOR_PATTERNS = [
+    r"^best\s+.*\s+near",
+    r"^top\s+\d+\s+best",
+    r"^the\s+best\s+\d+",
+    r"near\s+me\s+in\s+",
+    r"^\d+\s+of\s+the\s+best",
+    r"^find\s+.*\s+near",
+    r"^book\s+\d+.*\s+near",
+    r"(lawyer|attorney|legal)s?\s+near\s+me\s+in",
+]
+
 
 def load_progress() -> Dict:
     """Load progress from previous runs"""
@@ -145,6 +157,17 @@ def extract_phone_from_text(text: str) -> Optional[str]:
     return None
 
 
+def is_aggregator_listing(name: str) -> bool:
+    """Check if the office name matches aggregator/directory listing patterns"""
+    name_lower = name.lower()
+
+    for pattern in AGGREGATOR_PATTERNS:
+        if re.search(pattern, name_lower, re.IGNORECASE):
+            return True
+
+    return False
+
+
 def extract_address_from_snippet(snippet: str, title: str) -> Optional[str]:
     """Extract address from search result snippet"""
     # Look for patterns like "123 Main St, Brooklyn, NY 11201"
@@ -171,6 +194,10 @@ def parse_serper_results(results: Dict, search_query: str, location: str) -> Lis
 
             # Skip if already seen
             if name.lower() in seen_names:
+                continue
+
+            # Skip aggregator/directory listings
+            if is_aggregator_listing(name):
                 continue
 
             # Filter for law firms
@@ -206,6 +233,10 @@ def parse_serper_results(results: Dict, search_query: str, location: str) -> Lis
 
             # Skip if already seen
             if name.lower() in seen_names:
+                continue
+
+            # Skip aggregator/directory listings
+            if is_aggregator_listing(name):
                 continue
 
             # Filter for law firms

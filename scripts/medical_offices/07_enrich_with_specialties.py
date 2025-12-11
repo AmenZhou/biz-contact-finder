@@ -75,6 +75,19 @@ SPECIALTY_NORMALIZATION = {
     "internist": "Internal Medicine",
 }
 
+# Patterns to identify aggregator/directory listings (not actual doctors)
+AGGREGATOR_PATTERNS = [
+    r"^best\s+.*\s+near",
+    r"^top\s+\d+\s+best",
+    r"^the\s+best\s+\d+",
+    r"near\s+me\s+in\s+",
+    r"^\d+\s+of\s+the\s+best",
+    r"^find\s+.*\s+near",
+    r"^book\s+\d+.*\s+near",
+    r"doctors?\s+near\s+me\s+in",
+    r"physicians?\s+near\s+me\s+in",
+]
+
 
 def fetch_website_content(url: str, timeout: int = 10, max_retries: int = 2) -> Optional[str]:
     """Fetch website HTML content with retry logic"""
@@ -139,6 +152,17 @@ def extract_specialties_from_name(name: str) -> List[str]:
                 break
 
     return list(set(specialties))  # Remove duplicates
+
+
+def is_aggregator_listing(name: str) -> bool:
+    """Check if the office name matches aggregator/directory listing patterns"""
+    name_lower = name.lower()
+
+    for pattern in AGGREGATOR_PATTERNS:
+        if re.search(pattern, name_lower, re.IGNORECASE):
+            return True
+
+    return False
 
 
 def normalize_specialties(specialties: List[str]) -> List[str]:
@@ -299,11 +323,21 @@ def main():
     print(f"📂 Loading data from {INPUT_CSV}")
     df = pd.read_csv(INPUT_CSV)
 
+    print(f"   ✓ Loaded {len(df)} total records")
+
+    # Filter out aggregator/directory listings
+    aggregator_mask = df['name'].apply(is_aggregator_listing)
+    num_aggregators = aggregator_mask.sum()
+
+    if num_aggregators > 0:
+        print(f"   🗑️  Filtering out {num_aggregators} aggregator/directory listings")
+        df = df[~aggregator_mask].reset_index(drop=True)
+        print(f"   ✓ {len(df)} records remaining after filtering")
+
     # Add specialties column if it doesn't exist
     if 'specialties' not in df.columns:
         df['specialties'] = ""
 
-    print(f"   ✓ Loaded {len(df)} total records")
     print()
 
     # Count records needing enrichment

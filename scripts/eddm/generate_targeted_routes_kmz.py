@@ -20,7 +20,7 @@ from pathlib import Path
 
 import requests
 import simplekml
-from simplekml import Kml, Style, LineStyle
+from simplekml import Kml
 
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -29,23 +29,21 @@ DATA_DIR = PROJECT_ROOT / "data" / "eddm"
 # USPS EDDM ArcGIS API
 EDDM_API_URL = "https://gis.usps.com/arcgis/rest/services/EDDM/selectZIP/GPServer/routes/execute"
 
-# Color bins by residential count (KML aabbggrr format)
-RES_COUNT_BINS = [
-    {"max": 250,          "color": "ff0000ff", "width": 2, "label": "< 250 residences"},
-    {"max": 500,          "color": "ff00a5ff", "width": 3, "label": "250 - 500 residences"},
-    {"max": 750,          "color": "ff00ffff", "width": 4, "label": "500 - 750 residences"},
-    {"max": 1000,         "color": "ff00ff00", "width": 5, "label": "750 - 1,000 residences"},
-    {"max": float('inf'), "color": "ffff0000", "width": 6, "label": "1,000+ residences"},
+# Distinct color palette for differentiating routes within the same ZIP (KML aabbggrr format)
+ROUTE_COLORS = [
+    "ff0000ff",  # Red
+    "ffff0000",  # Blue
+    "ff00cc00",  # Green
+    "ff00a5ff",  # Orange
+    "ffff00ff",  # Magenta
+    "ff00ffff",  # Yellow
+    "ffaa00ff",  # Pink
+    "ff00ffaa",  # Lime
+    "ffccaa00",  # Teal
+    "ff5050ff",  # Salmon
+    "ffff5050",  # Light Blue
+    "ff50ff50",  # Light Green
 ]
-
-
-def get_style_for_res_count(res_count):
-    """Return (color, width, label) for a residential count."""
-    for bin_cfg in RES_COUNT_BINS:
-        if res_count < bin_cfg["max"]:
-            return bin_cfg["color"], bin_cfg["width"], bin_cfg["label"]
-    last = RES_COUNT_BINS[-1]
-    return last["color"], last["width"], last["label"]
 
 
 def load_targets(csv_path):
@@ -150,8 +148,7 @@ def main():
     kml.document.name = "Targeted EDDM Carrier Routes"
     kml.document.description = (
         f"Targeted USPS EDDM carrier routes ({total_pairs} routes across {len(targets)} ZIPs)\n"
-        f"Color-coded by residential address count\n\n"
-        + "\n".join(f"  {b['label']}" for b in RES_COUNT_BINS)
+        f"Routes in the same ZIP code have different colors for easy distinction."
     )
 
     matched = 0
@@ -179,6 +176,7 @@ def main():
             by_crid[crid_id] = f
 
         zip_found = 0
+        color_idx = 0
 
         for crid in sorted(wanted_crids):
             feature = by_crid.get(crid)
@@ -196,16 +194,19 @@ def main():
             res_cnt = attrs.get("RES_CNT", 0) or 0
             bus_cnt = attrs.get("BUS_CNT", 0) or 0
             tot_cnt = attrs.get("TOT_CNT", 0) or 0
-            color, width, _ = get_style_for_res_count(res_cnt)
 
-            # Each route as a top-level item (no folder nesting)
+            # Cycle through distinct colors per ZIP
+            color = ROUTE_COLORS[color_idx % len(ROUTE_COLORS)]
+            color_idx += 1
+
+            # Single MultiGeometry placemark per route
+            mg = kml.newmultigeometry(name=f"{zipcode}-{crid} ({res_cnt:,} res)")
+            mg.description = build_description(attrs)
+            mg.style.linestyle.color = color
+            mg.style.linestyle.width = 4
             for path in paths:
                 coords = [(pt[0], pt[1]) for pt in path]
-                ls = kml.newlinestring(name=f"{zipcode}-{crid} ({res_cnt:,} res)")
-                ls.coords = coords
-                ls.description = build_description(attrs)
-                ls.style.linestyle.color = color
-                ls.style.linestyle.width = width
+                mg.newlinestring().coords = coords
 
             matched += 1
             zip_found += 1
@@ -243,9 +244,7 @@ def main():
             print(f"   {z} {c}")
 
     print()
-    print("Color Legend (by residential count):")
-    for b in RES_COUNT_BINS:
-        print(f"   {b['label']}")
+    print("Routes in the same ZIP have different colors for distinction.")
     print()
     print("Import into Google My Maps:")
     print("   1. Go to https://mymaps.google.com")

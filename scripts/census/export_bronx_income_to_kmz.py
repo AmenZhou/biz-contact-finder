@@ -31,7 +31,7 @@ OUTPUT_KML = EXPORTS_DIR / "bronx_income.kml"
 OUTPUT_KMZ = EXPORTS_DIR / "bronx_income.kmz"
 
 # Census API Configuration
-CENSUS_API_URL = "https://api.census.gov/data/2022/acs/acs5"
+CENSUS_API_URL = "https://api.census.gov/data/2023/acs/acs5"
 # Bronx County FIPS: 005
 BRONX_FIPS = "005"
 NY_STATE_FIPS = "36"
@@ -60,8 +60,8 @@ def download_census_tracts() -> Path:
     BOUNDARIES_DIR.mkdir(parents=True, exist_ok=True)
 
     # TIGER/Line 2022 URL for NY census tracts
-    url = "https://www2.census.gov/geo/tiger/TIGER2022/TRACT/tl_2022_36_tract.zip"
-    zip_path = BOUNDARIES_DIR / "tl_2022_36_tract.zip"
+    url = "https://www2.census.gov/geo/tiger/TIGER2023/TRACT/tl_2023_36_tract.zip"
+    zip_path = BOUNDARIES_DIR / "tl_2023_36_tract.zip"
 
     if not zip_path.exists():
         print(f"   Downloading from {url}...")
@@ -89,7 +89,7 @@ def download_census_tracts() -> Path:
     else:
         print(f"   Using cached shapefile at {zip_path}")
 
-    return BOUNDARIES_DIR / "tl_2022_36_tract.shp"
+    return BOUNDARIES_DIR / "tl_2023_36_tract.shp"
 
 
 def fetch_income_data() -> pd.DataFrame:

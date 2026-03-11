@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Export Manhattan Census Tract Median Household Income to KMZ
+Export Staten Island Census Tract Median Household Income to KMZ
 Creates color-coded choropleth map similar to JusticeMap.org
 """
 
@@ -27,18 +27,19 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "census"
 BOUNDARIES_DIR = DATA_DIR / "boundaries"
 EXPORTS_DIR = DATA_DIR / "exports"
-OUTPUT_KML = EXPORTS_DIR / "manhattan_income.kml"
-OUTPUT_KMZ = EXPORTS_DIR / "manhattan_income.kmz"
+OUTPUT_KML = EXPORTS_DIR / "staten_island_income.kml"
+OUTPUT_KMZ = EXPORTS_DIR / "staten_island_income.kmz"
 
 # Census API Configuration
 CENSUS_API_URL = "https://api.census.gov/data/2023/acs/acs5"
-# Manhattan (New York County) FIPS: 061
-MANHATTAN_FIPS = "061"
+# Staten Island (Richmond County): 085
+STATEN_ISLAND_FIPS = "085"
 NY_STATE_FIPS = "36"
 
 # Color bins for median household income (matching legend color scheme)
 # KML colors are in 'aabbggrr' format (alpha, blue, green, red)
 # 9-bin system with 30% opacity for most brackets, higher opacity for highest bracket
+# Legend mapping: 1=10k, 5=50k, 10=100k
 INCOME_BINS = [
     {"max": 50000, "color": "4d000000", "label": "< $50,000"},                # Black - 30% opacity
     {"max": 60000, "color": "4d0000FF", "label": "$50,000 - $60,000"},       # Red - 30% opacity
@@ -53,7 +54,7 @@ INCOME_BINS = [
 
 
 def download_census_tracts() -> Path:
-    """Download TIGER/Line shapefiles for Manhattan census tracts"""
+    """Download TIGER/Line shapefiles for Staten Island census tracts"""
     print("\n1. Downloading census tract boundaries...")
 
     # Create boundaries directory
@@ -85,9 +86,9 @@ def download_census_tracts() -> Path:
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(BOUNDARIES_DIR)
 
-        print(f"   Done - extracted to {BOUNDARIES_DIR}")
+        print(f"   ✓ Downloaded and extracted to {BOUNDARIES_DIR}")
     else:
-        print(f"   Using cached shapefile at {zip_path}")
+        print(f"   ✓ Using cached shapefile at {zip_path}")
 
     return BOUNDARIES_DIR / "tl_2023_36_tract.shp"
 
@@ -96,11 +97,11 @@ def fetch_income_data() -> pd.DataFrame:
     """Fetch median household income data from Census ACS API"""
     print("\n2. Fetching median household income data from Census API...")
 
-    # Build API request for Manhattan
+    # Build API request for Staten Island
     params = {
         'get': 'NAME,B19013_001E',  # B19013_001E = Median Household Income
         'for': 'tract:*',
-        'in': f'state:{NY_STATE_FIPS}+county:{MANHATTAN_FIPS}'
+        'in': f'state:{NY_STATE_FIPS}+county:{STATEN_ISLAND_FIPS}'
     }
 
     print(f"   Querying: {CENSUS_API_URL}")
@@ -123,9 +124,10 @@ def fetch_income_data() -> pd.DataFrame:
     df.loc[df['median_income'] < 0, 'median_income'] = None
 
     # Add borough name
-    df['borough'] = 'Manhattan'
+    df['borough'] = 'Staten Island'
 
-    print(f"   Fetched {len(df)} census tracts")
+    print(f"   ✓ Fetched {len(df)} census tracts")
+    print(f"      Staten Island: {len(df)} tracts")
     print(f"      Tracts with income data: {df['median_income'].notna().sum()}")
 
     return df[['GEOID', 'NAME', 'borough', 'median_income']]
@@ -139,14 +141,14 @@ def merge_geo_and_income(shapefile_path: Path, income_df: pd.DataFrame) -> gpd.G
     print(f"   Loading shapefile: {shapefile_path}")
     gdf = gpd.read_file(shapefile_path)
 
-    # Filter to Manhattan only
-    gdf = gdf[gdf['COUNTYFP'] == MANHATTAN_FIPS].copy()
-    print(f"   Loaded {len(gdf)} tracts for Manhattan")
+    # Filter to Staten Island only
+    gdf = gdf[gdf['COUNTYFP'] == STATEN_ISLAND_FIPS].copy()
+    print(f"   ✓ Loaded {len(gdf)} tracts for Staten Island")
 
     # Merge with income data (rename NAME to avoid conflict)
     income_df_renamed = income_df.rename(columns={'NAME': 'tract_name'})
     merged = gdf.merge(income_df_renamed, on='GEOID', how='left')
-    print(f"   Merged {len(merged)} tracts with income data")
+    print(f"   ✓ Merged {len(merged)} tracts with income data")
 
     # Simplify geometries to reduce file size
     print("   Simplifying geometries...")
@@ -158,7 +160,7 @@ def merge_geo_and_income(shapefile_path: Path, income_df: pd.DataFrame) -> gpd.G
 def get_color_for_income(income: Optional[float]) -> str:
     """Get color code based on income bin"""
     if pd.isna(income):
-        return "4d000000"  # Semi-transparent black/gray for missing data (30% opacity)
+        return "4d000000"  # Semi-transparent black/gray for missing data (30% opacity, matches reference)
 
     for bin_config in INCOME_BINS:
         if income < bin_config['max']:
@@ -173,7 +175,8 @@ def create_kmz(gdf: gpd.GeoDataFrame) -> None:
 
     # Create KML object with shared styles at Document level for Google My Maps compatibility
     kml = Kml()
-    kml.document.name = "Manhattan Median Household Income"
+    kml.document.name = "Staten Island Median Household Income"
+    # Enable shared styles - styles must be at Document level for Google My Maps
     kml.document.sharestyle = True
     kml.document.description = f"""
 Census Tract Level Median Household Income
@@ -181,14 +184,19 @@ Data Source: US Census Bureau American Community Survey (ACS) 2022 5-Year Estima
 Table B19013: Median Household Income in the Past 12 Months
 
 Total Census Tracts: {len(gdf)}
+Staten Island: {len(gdf)}
 
 Color Legend:
-{''.join([f'- {bin["label"]}' + chr(10) for bin in INCOME_BINS])}
+{''.join([f'• {bin["label"]}' + chr(10) for bin in INCOME_BINS])}
 
 Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
 """
 
-    # Create shared styles at Document level
+    # Add legend as a screen overlay description
+    legend_text = "\\n".join([f"{bin['label']}" for bin in INCOME_BINS])
+
+    # Create shared styles at Document level (before creating Folders)
+    # Google My Maps only resolves styleUrl references when styles are at Document level
     print("   Creating shared styles at Document level...")
     color_to_style_id: Dict[str, str] = {}
 
@@ -196,6 +204,7 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
     for bin_config in INCOME_BINS:
         color = bin_config['color']
         if color not in color_to_style_id:
+            # Create a unique style ID based on color
             style_id = f"poly-{color}"
             style = Style()
             style._id = style_id
@@ -211,14 +220,14 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
         style = Style()
         style._id = style_id
         style.polystyle = PolyStyle(color=missing_data_color, fill=1, outline=1)
-        style.linestyle = LineStyle(color="ff000000", width=0.5)
+        style.linestyle = LineStyle(color="ff000000", width=0.5)  # Black outline
         kml.document.styles.append(style)
         color_to_style_id[missing_data_color] = style_id
 
-    print(f"   Created {len(color_to_style_id)} shared styles at Document level")
+    print(f"   ✓ Created {len(color_to_style_id)} shared styles at Document level")
 
-    # Create folder for Manhattan
-    manhattan_folder = kml.newfolder(name=f"Manhattan ({len(gdf)} tracts)")
+    # Create folder for Staten Island
+    staten_island_folder = kml.newfolder(name=f"Staten Island ({len(gdf)} tracts)")
 
     # Track statistics
     total_tracts = 0
@@ -231,6 +240,7 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
         # Get census tract info
         geoid = row['GEOID']
         tract_name = row.get('tract_name', f"Tract {row['TRACTCE']}")
+        borough = row['borough']
         income = row['median_income']
         geometry = row['geometry']
 
@@ -242,7 +252,7 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
             missing_data += 1
 
         # Create polygon
-        pol = manhattan_folder.newpolygon(name=placemark_name)
+        pol = staten_island_folder.newpolygon(name=placemark_name)
 
         # Extract coordinates from geometry
         if geometry.geom_type == 'Polygon':
@@ -257,7 +267,8 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
         # Set polygon coordinates (lon, lat)
         pol.outerboundaryis = coords
 
-        # Use styleUrl references to Document-level styles
+        # CRITICAL: Use styleUrl references to Document-level styles for Google My Maps compatibility
+        # Google My Maps only resolves styleUrl references when styles are at Document level
         color = get_color_for_income(income)
         style_id = color_to_style_id[color]
         pol.styleurl = f"#{style_id}"
@@ -266,7 +277,7 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
         if pd.notna(income):
             description = f"""
 <b>Census Tract:</b> {row['TRACTCE']}<br/>
-<b>Borough:</b> Manhattan<br/>
+<b>Borough:</b> {borough}<br/>
 <b>Median Household Income:</b> ${income:,.0f}<br/>
 <b>GEOID:</b> {geoid}<br/>
 <br/>
@@ -275,7 +286,7 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
         else:
             description = f"""
 <b>Census Tract:</b> {row['TRACTCE']}<br/>
-<b>Borough:</b> Manhattan<br/>
+<b>Borough:</b> {borough}<br/>
 <b>Median Household Income:</b> No Data Available<br/>
 <b>GEOID:</b> {geoid}<br/>
 <br/>
@@ -287,7 +298,7 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
         if total_tracts % 100 == 0:
             print(f"   Progress: {total_tracts} tracts processed...")
 
-    print(f"   Processed {total_tracts} census tracts")
+    print(f"   ✓ Processed {total_tracts} census tracts")
     print(f"      Tracts with data: {total_tracts - missing_data}")
     print(f"      Tracts without data: {missing_data}")
 
@@ -296,9 +307,10 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     kml.save(str(OUTPUT_KML))
-    print(f"   KML saved: {OUTPUT_KML}")
+    print(f"   ✓ KML saved: {OUTPUT_KML}")
 
-    # Post-process KML to add styleUrl to Placemark elements
+    # Post-process KML to add styleUrl to Placemark elements based on polygon color
+    # This is needed because simplekml doesn't easily support setting styleurl on Placemarks
     print("   Post-processing KML to add styleUrl to Placemarks...")
     tree = ET.parse(OUTPUT_KML)
     root = tree.getroot()
@@ -313,42 +325,51 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}
         color = get_color_for_income(income)
         style_id = color_to_style_id[color]
 
+        # Find the Placemark by matching GEOID in the description (more unique than tract number)
         geoid = row['GEOID']
+        borough = row['borough']
+        tract_ce = row['TRACTCE']
 
         for placemark in root.iter(f'{kml_ns}Placemark'):
+            # Check description for GEOID to uniquely identify the placemark
             desc_elem = placemark.find(f'{kml_ns}description')
             if desc_elem is not None and geoid in desc_elem.text:
-                if placemark.find(f'{kml_ns}styleUrl') is None:
-                    styleurl_new = ET.Element(f'{kml_ns}styleUrl')
-                    styleurl_new.text = f"#{style_id}"
-                    insert_pos = 0
-                    for i, child in enumerate(placemark):
-                        if child.tag.endswith('description'):
-                            insert_pos = i + 1
-                            break
-                    placemark.insert(insert_pos, styleurl_new)
-                break
+                # Also verify borough matches to be extra sure
+                if borough in desc_elem.text:
+                    # Check if Placemark doesn't already have a styleUrl
+                    if placemark.find(f'{kml_ns}styleUrl') is None:
+                        # Create styleUrl element for Placemark
+                        styleurl_new = ET.Element(f'{kml_ns}styleUrl')
+                        styleurl_new.text = f"#{style_id}"
+                        # Insert styleUrl after description but before Polygon
+                        insert_pos = 0
+                        for i, child in enumerate(placemark):
+                            if child.tag.endswith('description'):
+                                insert_pos = i + 1
+                                break
+                        placemark.insert(insert_pos, styleurl_new)
+                    break
 
-    # Save the fixed KML
+    # Save the fixed KML with proper namespace handling
     tree.write(OUTPUT_KML, encoding='utf-8', xml_declaration=True)
-    print(f"   KML post-processed: {OUTPUT_KML}")
+    print(f"   ✓ KML post-processed: {OUTPUT_KML}")
 
     # Create KMZ (zipped KML)
     with zipfile.ZipFile(OUTPUT_KMZ, 'w', zipfile.ZIP_DEFLATED) as kmz:
         kmz.write(OUTPUT_KML, arcname='doc.kml')
-    print(f"   KMZ saved: {OUTPUT_KMZ}")
+    print(f"   ✓ KMZ saved: {OUTPUT_KMZ}")
 
     # File sizes
     kml_size = OUTPUT_KML.stat().st_size / 1024 / 1024
     kmz_size = OUTPUT_KMZ.stat().st_size / 1024 / 1024
-    print(f"   KML size: {kml_size:.2f} MB")
-    print(f"   KMZ size: {kmz_size:.2f} MB")
+    print(f"   KML size: {kml_size:.1f} MB")
+    print(f"   KMZ size: {kmz_size:.1f} MB")
 
 
 def main():
     """Main execution function"""
     print("=" * 60)
-    print("MANHATTAN: MEDIAN HOUSEHOLD INCOME MAP")
+    print("STATEN ISLAND: MEDIAN HOUSEHOLD INCOME MAP")
     print("=" * 60)
 
     try:
@@ -370,19 +391,19 @@ def main():
         print("=" * 60)
         print(f"Output File: {OUTPUT_KMZ}")
         print()
-        print("Ready to import into Google My Maps!")
-        print("   -> Go to https://mymaps.google.com")
-        print("   -> Click 'Create a New Map'")
-        print("   -> Click 'Import'")
-        print("   -> Upload the .kmz file")
+        print("✅ Ready to import into Google My Maps!")
+        print("   → Go to https://mymaps.google.com")
+        print("   → Click 'Create a New Map'")
+        print("   → Click 'Import'")
+        print("   → Upload the .kmz file")
         print()
-        print("Color Legend:")
+        print("📊 Color Legend:")
         for bin_config in INCOME_BINS:
-            print(f"   - {bin_config['label']}")
+            print(f"   • {bin_config['label']}")
         print("=" * 60)
 
     except Exception as e:
-        print(f"\nError: {e}")
+        print(f"\n❌ Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

@@ -22,18 +22,38 @@ OUTPUT_KML = DATA_DIR / "exports" / "lower_manhattan_tenants.kml"
 OUTPUT_KMZ = DATA_DIR / "exports" / "lower_manhattan_tenants.kmz"
 
 
+def is_apartment_building(row: Dict) -> bool:
+    """Return True for apartment buildings; exclude single-family (A) and townhouses (B)."""
+    bc = row.get('bldg_class', '')
+    bt = row.get('building_type', '').lower()
+    if bc[:1] in ('A', 'B'):
+        return False
+    if bc[:1] in ('C', 'D'):   # walk-up and elevator apartments
+        return True
+    if bt in ('apartments', 'residential'):
+        return True
+    return False
+
+
 def load_building_data() -> List[Dict]:
-    """Load all building coordinates from CSV"""
+    """Load apartment buildings from CSV."""
     buildings = []
     with open(BUILDINGS_CSV, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Load all buildings - scraper already filtered for commercial/office
+            if not is_apartment_building(row):
+                continue
             buildings.append({
                 'address': row['address'],
                 'lat': float(row['latitude']),
                 'lon': float(row['longitude']),
-                'levels': row.get('building_levels', 'N/A')
+                'levels': row.get('building_levels', 'N/A'),
+                'building_name': row.get('building_name', ''),
+                'building_type': row.get('building_type', ''),
+                'bldg_class': row.get('bldg_class', ''),
+                'zip_code': row.get('zip_code', ''),
+                'owner_name': row.get('owner_name', ''),
+                'year_built': row.get('year_built', ''),
             })
     return buildings
 
@@ -81,6 +101,11 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
     """Generate HTML popup content for a building"""
     address = building['address']
     levels = building['levels']
+    building_name = building.get('building_name', '')
+    bldg_class = building.get('bldg_class', '')
+    zip_code = building.get('zip_code', '')
+    owner_name = building.get('owner_name', '')
+    year_built = building.get('year_built', '')
 
     # Count totals
     total_merchants = len(tenants['merchants'])
@@ -88,19 +113,29 @@ def create_html_popup(building: Dict, tenants: Dict) -> str:
     total_contacts = len(tenants['building_contacts'])
     total_tenants = total_merchants + total_lawyers
 
+    display_name = building_name if building_name else address
+
     # Start HTML
     html = f'''<div style="font-family: Arial, sans-serif; max-width: 500px; font-size: 13px;">
   <h3 style="color: #1a73e8; margin: 0 0 5px 0; font-size: 16px;">
-    🏢 {address}
+    🏠 {display_name}
   </h3>
   <p style="color: #666; margin: 5px 0; font-size: 12px;">
-    📍 {address}
+    📍 {address}{(", " + zip_code) if zip_code else ""}
   </p>
   <hr style="border: 1px solid #ddd; margin: 10px 0;"/>
 
-  <p style="margin: 5px 0;"><b>Total Tenants:</b> {total_tenants}</p>
   <p style="margin: 5px 0;"><b>Building Levels:</b> {levels}</p>
 '''
+    if bldg_class:
+        html += f'  <p style="margin: 5px 0;"><b>Class:</b> {bldg_class}</p>\n'
+    if owner_name:
+        html += f'  <p style="margin: 5px 0;"><b>Owner:</b> {owner_name}</p>\n'
+    if year_built:
+        html += f'  <p style="margin: 5px 0;"><b>Year Built:</b> {year_built}</p>\n'
+    if total_tenants > 0:
+        html += f'  <p style="margin: 5px 0;"><b>Total Tenants:</b> {total_tenants}</p>\n'
+    html += '\n'
 
     # Merchants Section
     if total_merchants > 0:
